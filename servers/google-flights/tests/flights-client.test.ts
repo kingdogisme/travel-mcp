@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildQueryString,
+  expandAnywhereCandidates,
+  searchAnywhere,
   buildTfsParam,
   detectBlock,
   enumerateGridDates,
@@ -358,5 +360,109 @@ describe('tool registry', () => {
       'search_anywhere',
       'find_airport_code',
     ]);
+  });
+});
+
+describe('search_anywhere candidate expansion', () => {
+  const noLookup = async () => [];
+  const noResolve = async (value: string) => value;
+
+  it('prefers a known metro code for a multi-airport city', async () => {
+    let lookedUp = 0;
+    const result = await expandAnywhereCandidates(
+      { origin: 'SFO', regions: ['London'], airports_per_region: 3, max_destinations: 5 },
+      async () => {
+        lookedUp += 1;
+        return [{ code: 'LCY', name: 'London City Airport', city: '', country: '' }];
+      }
+    );
+    expect(result.candidates).toEqual([{ destination: 'LON', region: 'London' }]);
+    expect(lookedUp).toBe(0);
+  });
+
+  it('expands an unknown region through the airport lookup', async () => {
+    const result = await expandAnywhereCandidates(
+      { origin: 'SFO', regions: ['Japan'], airports_per_region: 2, max_destinations: 5 },
+      async () => [
+        { code: 'HND', name: 'Haneda Airport', city: 'Tokyo', country: 'Japan' },
+        { code: 'NRT', name: 'Narita International Airport', city: 'Tokyo', country: 'Japan' },
+        { code: 'FUK', name: 'Fukuoka Airport', city: 'Fukuoka', country: 'Japan' },
+      ]
+    );
+    expect(result.candidates).toEqual([
+      { destination: 'HND', name: 'Haneda Airport', region: 'Japan' },
+      { destination: 'NRT', name: 'Narita International Airport', region: 'Japan' },
+    ]);
+  });
+
+  it('falls back to the city/IATA resolver when the lookup finds nothing', async () => {
+    const result = await expandAnywhereCandidates(
+      { origin: 'SFO', regions: ['nrt'], airports_per_region: 3, max_destinations: 5 },
+      noLookup,
+      async () => 'NRT'
+    );
+    expect(result.candidates).toEqual([{ destination: 'NRT', region: 'nrt' }]);
+  });
+
+  it('skips a region that resolves to nothing usable', async () => {
+    const result = await expandAnywhereCandidates(
+      { origin: 'SFO', regions: ['Caribbean'], airports_per_region: 3, max_destinations: 5 },
+      noLookup,
+      async () => 'Caribbean'
+    );
+    expect(result.candidates).toEqual([]);
+    expect(result.notes.join(' ')).toContain('Could not resolve "Caribbean"');
+  });
+
+  it('keeps explicit destinations, drops duplicates and never prices the origin', async () => {
+    const result = await expandAnywhereCandidates(
+      {
+        origin: 'SFO',
+        destinations: ['NRT', 'nrt', 'SFO', 'Bangkok'],
+        airports_per_region: 3,
+        max_destinations: 5,
+      },
+      noLookup,
+      async (value) => (value === 'Bangkok' ? 'BKK' : value)
+    );
+    expect(result.candidates.map((candidate) => candidate.destination)).toEqual(['NRT', 'BKK']);
+  });
+
+  it('caps the list and explains the truncation', async () => {
+    const result = await expandAnywhereCandidates(
+      { origin: 'SFO', destinations: ['NRT', 'BKK', 'LIS', 'HNL'], airports_per_region: 3, max_destinations: 2 },
+      noLookup,
+      noResolve
+    );
+    expect(result.candidates.map((candidate) => candidate.destination)).toEqual(['NRT', 'BKK']);
+    expect(result.truncated).toBe(true);
+    expect(result.notes.join(' ')).toContain('priced the first 2');
+  });
+
+  it('requires at least one candidate', async () => {
+    await expect(
+      expandAnywhereCandidates({ origin: 'SFO', airports_per_region: 3, max_destinations: 5 })
+    ).rejects.toThrow(/at least one candidate/);
+  });
+});
+
+describe('round-trip guard', () => {
+  it('refuses a round trip without a return date instead of pricing a one-way', async () => {
+    await expect(
+      searchAnywhere({
+        origin: 'SFO',
+        destinations: ['NRT'],
+        departure_date: '2026-11-18',
+        trip_type: 'round_trip',
+        airports_per_region: 3,
+        max_destinations: 1,
+        seat_class: 'economy',
+        adults: 1,
+        children: 0,
+        currency: 'USD',
+        exclude_basic_economy: true,
+        sort_by: 'price',
+      })
+    ).rejects.toThrow(/return_date is required/);
   });
 });

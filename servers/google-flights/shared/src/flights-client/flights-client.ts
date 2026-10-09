@@ -1108,6 +1108,7 @@ export async function resolveAirportInput(value: string | string[]): Promise<str
 export async function searchFlights(options: SearchFlightsOptions): Promise<SearchFlightsResult> {
   // Note: max_stops filtering is done client-side after parsing results.
   // Sending maxStops=0 in the protobuf can cause Google to return empty results.
+  assertReturnDate(options.trip_type, options.return_date);
   const origin = await resolveAirportInput(options.origin);
   const destination = await resolveAirportInput(options.destination);
   const resolved = { ...options, origin, destination };
@@ -1303,14 +1304,37 @@ export function rankAnywhereDestinations(
 }
 
 /**
- * "Cheapest places to go" from one origin. Google's Explore map keeps its
- * destination + price feed behind a BotGuard token that only a real browser
- * session can mint, so instead of scraping Explore we price a candidate list:
- * explicit destinations, and/or regions like "Japan" expanded into airports
- * through findAirportCode. One polite lookup per destination, then ranked.
+ * Round trips need a return date. Without one Google quietly prices a one-way
+ * itinerary, which would show up as a suspiciously cheap "round trip".
  */
-export async function searchAnywhere(options: SearchAnywhereOptions): Promise<SearchAnywhereResult> {
-  const origin = String(await resolveAirportInput(options.origin));
+function assertReturnDate(tripType: TripType, returnDate?: string): void {
+  if (tripType === 'round_trip' && !returnDate) {
+    throw new Error('return_date is required for a round_trip search');
+  }
+}
+
+export interface AnywhereCandidateOptions {
+  origin: string;
+  destinations?: string[];
+  regions?: string[];
+  airports_per_region: number;
+  max_destinations: number;
+}
+
+/**
+ * Turn the caller's regions and explicit destinations into the list of places
+ * we will price. Regions resolve in three steps: a known metro code, then the
+ * airport lookup, then the plain city/IATA resolver.
+ */
+export async function expandAnywhereCandidates(
+  options: AnywhereCandidateOptions,
+  lookup: (query: string) => Promise<AirportResult[]> = findAirportCode,
+  resolve: (value: string) => Promise<string | string[]> = resolveAirportInput
+): Promise<{
+  candidates: Array<{ destination: string; name?: string; region?: string }>;
+  truncated: boolean;
+  notes: string[];
+}> {
   const regions = (options.regions ?? []).map((region) => region.trim()).filter((region) => region.length > 0);
   const explicit = options.destinations ?? [];
   if (regions.length === 0 && explicit.length === 0) {
@@ -1320,9 +1344,15 @@ export async function searchAnywhere(options: SearchAnywhereOptions): Promise<Se
   const notes: string[] = [];
   const candidates: Array<{ destination: string; name?: string; region?: string }> = [];
   const seen = new Set<string>();
+  const originCodes = new Set(parseAirportList(options.origin));
   const push = (destination: string, name?: string, region?: string) => {
     const key = destination.toUpperCase();
     if (key.length === 0 || seen.has(key)) return;
+    const codes = destination
+      .split(',')
+      .map((code) => code.trim().toUpperCase())
+      .filter((code) => code.length > 0);
+    if (codes.length > 0 && codes.every((code) => originCodes.has(code))) return;
     seen.add(key);
     const entry: { destination: string; name?: string; region?: string } = { destination };
     if (name) entry.name = name;
@@ -1332,27 +1362,63 @@ export async function searchAnywhere(options: SearchAnywhereOptions): Promise<Se
 
   const perRegion = Math.max(1, options.airports_per_region);
   for (const region of regions) {
-    const airports = await findAirportCode(region);
-    if (airports.length === 0) {
-      notes.push(`No airports found for "${region}".`);
+    const metro = CITY_METRO_CODES[region.toLowerCase().replace(/\s+/g, ' ')];
+    if (metro) {
+      push(metro, undefined, region);
       continue;
     }
-    for (const airport of airports.slice(0, perRegion)) {
-      push(airport.code.toUpperCase(), airport.name, region);
+
+    const airports = await lookup(region);
+    if (airports.length > 0) {
+      for (const airport of airports.slice(0, perRegion)) {
+        push(airport.code.toUpperCase(), airport.name, region);
+      }
+      continue;
     }
+
+    const resolved = String(await resolve(region));
+    try {
+      parseAirportList(resolved);
+    } catch {
+      notes.push(`Could not resolve "${region}" to an airport; skipped.`);
+      continue;
+    }
+    push(resolved, undefined, region);
   }
+
   for (const destination of explicit) {
-    push(String(await resolveAirportInput(destination)));
+    push(String(await resolve(destination)));
   }
 
   const cap = Math.max(1, Math.min(options.max_destinations, MAX_ANYWHERE_DESTINATIONS));
   const truncated = candidates.length > cap;
-  const selected = candidates.slice(0, cap);
   if (truncated) {
     notes.push(
       `Candidate list had ${candidates.length} destinations; priced the first ${cap}. Raise max_destinations (hard max ${MAX_ANYWHERE_DESTINATIONS}) to cover more.`
     );
   }
+
+  return { candidates: candidates.slice(0, cap), truncated, notes };
+}
+
+/**
+ * "Cheapest places to go" from one origin. Google's Explore map keeps its
+ * destination + price feed behind a BotGuard token that only a real browser
+ * session can mint, so instead of scraping Explore we price a candidate list:
+ * explicit destinations, and/or regions like "Japan" expanded into airports
+ * through findAirportCode. One polite lookup per destination, then ranked.
+ */
+export async function searchAnywhere(options: SearchAnywhereOptions): Promise<SearchAnywhereResult> {
+  assertReturnDate(options.trip_type, options.return_date);
+  const origin = String(await resolveAirportInput(options.origin));
+  const regions = (options.regions ?? []).map((region) => region.trim()).filter((region) => region.length > 0);
+  const { candidates: selected, truncated, notes } = await expandAnywhereCandidates({
+    origin,
+    destinations: options.destinations,
+    regions: options.regions,
+    airports_per_region: options.airports_per_region,
+    max_destinations: options.max_destinations,
+  });
   if (selected.length === 0) {
     throw new Error('No candidate destinations to price');
   }
@@ -1473,6 +1539,7 @@ function enumerateGridDates(options: GetDateGridOptions): { dates: string[]; tru
 }
 
 export async function getDateGrid(options: GetDateGridOptions): Promise<DateGridResult> {
+  assertReturnDate(options.trip_type, options.return_date);
   const { dates, truncated } = enumerateGridDates(options);
   const origin = await resolveAirportInput(options.origin);
   const destination = await resolveAirportInput(options.destination);

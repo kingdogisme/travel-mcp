@@ -17,7 +17,7 @@ export const SearchAnywhereSchema = z.object({
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .optional()
-    .describe('Return date in YYYY-MM-DD format (required for round_trip)'),
+    .describe('Return date in YYYY-MM-DD format. Required when trip_type is round_trip'),
   trip_type: z.enum(['one_way', 'round_trip']).default('one_way').describe('Trip type'),
   destinations: z
     .array(z.string())
@@ -86,7 +86,7 @@ export function searchAnywhereTool(_server: Server, clientFactory: FlightsClient
     name: 'search_anywhere',
     description: `Find the cheapest places to go from one origin: price a set of candidate destinations and rank them.
 
-Give candidates either explicitly (destinations: ["NRT", "Bangkok", "LIS,OPO"]) or as regions that get expanded into their airports (regions: ["Japan", "Thailand", "Hawaii"]), or both. Each candidate is one one-way or round-trip search on the given dates, so the response is comparable: price, airline, stops, duration and times per destination, ordered cheapest first (or fastest first with sort_by: "duration").
+Give candidates either explicitly (destinations: ["NRT", "Bangkok", "LIS,OPO"]) or as regions that get expanded into their airports (regions: ["Japan", "Thailand", "Hawaii"]); a region that is a big multi-airport city resolves to its metro code ("London" -> LON). Each candidate is one one-way or round-trip search on the given dates (round trips need return_date), so the response is comparable: price, airline, stops, duration and times per destination, ordered cheapest first (or fastest first with sort_by: "duration").
 
 The response carries cheapest (the single best destination), no_results, searched_destinations and truncated. Keep max_destinations small: every destination is one live lookup, so the default of 5 keeps a call quick and polite.`,
     inputSchema: {
@@ -97,7 +97,7 @@ The response carries cheapest (the single best destination), no_results, searche
           description: 'Origin airport IATA code, city/airport name, or comma-separated list',
         },
         departure_date: { type: 'string', description: 'Departure date YYYY-MM-DD' },
-        return_date: { type: 'string', description: 'Return date YYYY-MM-DD (round trips only)' },
+        return_date: { type: 'string', description: 'Return date YYYY-MM-DD. Required when trip_type is round_trip' },
         trip_type: { type: 'string', enum: ['one_way', 'round_trip'], description: 'Trip type' },
         destinations: {
           type: 'array',
