@@ -9,14 +9,11 @@
 interface ServerState {
   authenticated: boolean;
   refreshToken: string | null;
-  /** Key for PointsYeah's public developer API (ai-api.pointsyeah.com). */
-  apiKey: string | null;
 }
 
 let state: ServerState = {
   authenticated: false,
   refreshToken: null,
-  apiKey: null,
 };
 
 export function getServerState(): Readonly<ServerState> {
@@ -35,22 +32,9 @@ export function clearRefreshToken(): void {
   state.refreshToken = null;
 }
 
-export function setApiKey(key: string): void {
-  state.apiKey = key;
-}
-
-export function getApiKey(): string | null {
-  return state.apiKey;
-}
-
-export function clearApiKey(): void {
-  state.apiKey = null;
-}
-
 export function resetState(): void {
   state = {
     authenticated: false,
     refreshToken: null,
-    apiKey: null,
   };
 }

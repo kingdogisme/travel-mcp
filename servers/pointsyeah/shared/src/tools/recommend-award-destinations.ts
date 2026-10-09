@@ -1,15 +1,14 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import type { ClientFactory } from '../server.js';
-import { PointsYeahApiClient } from '../pointsyeah-api/client.js';
 import { RecommendAwardDestinationsParamsSchema } from '../pointsyeah-api/schemas.js';
 
 const DESCRIPTION = `Recommend where to go on points from a given city.
 
 Answers "where can I fly on points from SFO?" by asking PointsYeah for curated routes out of an origin, optionally narrowed to a region. Returns the routes with their redemption value rather than a single date's availability.
 
-Requires a PointsYeah developer API key (premium tier): set POINTSYEAH_API_KEY or call set_api_key first. Fast — plain HTTP, no browser.`;
+Uses the same PointsYeah login as the other tools. Fast — plain HTTP, no browser.`;
 
-export function recommendAwardDestinationsTool(_server: Server, _clientFactory: ClientFactory) {
+export function recommendAwardDestinationsTool(_server: Server, clientFactory: ClientFactory) {
   return {
     name: 'recommend_award_destinations',
     description: DESCRIPTION,
@@ -52,7 +51,7 @@ export function recommendAwardDestinationsTool(_server: Server, _clientFactory: 
           ? { anywhere: true }
           : (params.arrival ?? {});
 
-        const result = await new PointsYeahApiClient().explorerRecommend({
+        const result = await clientFactory().exploreAwardRecommend({
           departure,
           arrival,
           today: params.today ?? new Date().toISOString().split('T')[0],

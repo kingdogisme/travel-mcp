@@ -1,6 +1,6 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import type { ClientFactory } from '../server.js';
-import { PointsYeahApiClient } from '../pointsyeah-api/client.js';
+import type { IPointsYeahClient } from '../server.js';
 import { ExploreAwardRoutesParamsSchema } from '../pointsyeah-api/schemas.js';
 
 const DESCRIPTION = `Explore award availability across whole regions and a date range, using PointsYeah's developer API.
@@ -8,14 +8,15 @@ const DESCRIPTION = `Explore award availability across whole regions and a date 
 Instead of naming one route, you describe where the trip starts and ends as places — airports, countries, continents, regions or states — and a window of dates. PointsYeah then returns every award it knows about in that space, cheapest-first, with miles, taxes, cabin, seats and transfer partners.
 
 Examples:
-- "award seats to Tokyo from any California airport in November" → arrival { airports: ["NRT", "HND"] } or { countries: ["Japan"] }, departure { states: ["California"] }
-- "business class awards from the US to Europe this winter" → departure { countries: ["United States"] }, arrival { continents: ["Europe"] }, cabins ["Business"]
+- "award seats to Tokyo from California in November" → arrival { airports: ["NRT", "HND"] } or { countries: ["JP"] }, departure { states: ["CA"] }
+- "business class awards from the US to Europe this winter" → departure { countries: ["US"] }, arrival { continents: ["EU"] }, cabins ["Business"]
+- "anywhere in Asia from SFO/OAK/SJC" → departure { airports: ["SFO", "OAK", "SJC"] }, arrival { continents: ["AS"] }
 
-Requires a PointsYeah developer API key (premium tier). Set POINTSYEAH_API_KEY, or call set_api_key first.
+Filters take codes, not names: airports are IATA ("NRT"), countries ISO-2 ("JP"), states two-letter ("CA"), continents two-letter ("AS", "EU", "NA", "SA", "AF", "OC"). Full names like "Japan" or "California" match nothing and come back empty. Give at least one filter, otherwise the search has nothing to work with.
 
-This is a plain HTTP API, so it answers in a second or two — unlike search_flights, which drives a real browser for live availability. Use this to find where the deals are, then search_flights to confirm live space.`;
+Uses the same PointsYeah login as the other tools (no separate API key), and a plain HTTP endpoint, so it answers in a second or two — unlike search_flights, which drives a real browser for live availability. Use this to find where the deals are, then search_flights to confirm live space.`;
 
-export function exploreAwardRoutesTool(_server: Server, _clientFactory: ClientFactory) {
+export function exploreAwardRoutesTool(_server: Server, clientFactory: ClientFactory) {
   return {
     name: 'explore_award_routes',
     description: DESCRIPTION,
@@ -24,7 +25,7 @@ export function exploreAwardRoutesTool(_server: Server, _clientFactory: ClientFa
       properties: {
         departure: {
           type: 'object',
-          description: 'Where the trip starts (airports / countries / continents / regions / states)',
+          description: 'Where the trip starts — codes only: airports ["SFO"], countries ["US"], continents ["AS"], states ["CA"]',
           properties: {
             airports: { type: 'array', items: { type: 'string' } },
             countries: { type: 'array', items: { type: 'string' } },
@@ -35,7 +36,7 @@ export function exploreAwardRoutesTool(_server: Server, _clientFactory: ClientFa
         },
         arrival: {
           type: 'object',
-          description: 'Where the trip ends (same shape as departure)',
+          description: 'Where the trip ends — same shape as departure (codes only)',
           properties: {
             airports: { type: 'array', items: { type: 'string' } },
             countries: { type: 'array', items: { type: 'string' } },
@@ -83,7 +84,7 @@ export function exploreAwardRoutesTool(_server: Server, _clientFactory: ClientFa
           };
         }
 
-        const result = await new PointsYeahApiClient().explorerSearch({
+        const result = await clientFactory().exploreAwardRoutes({
           departure,
           arrival,
           start_date: params.startDate,

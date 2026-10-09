@@ -22,6 +22,71 @@ import type { PlaywrightSearchDeps } from './pointsyeah-client/lib/search.js';
 import { fetchSearchResults } from './pointsyeah-client/lib/fetch-results.js';
 import { getSearchHistory } from './pointsyeah-client/lib/user-api.js';
 import { logDebug, logWarning } from './logging.js';
+import { API2_BASE, FETCH_TIMEOUT_MS } from './constants.js';
+
+// =============================================================================
+// EXPLORER / HOTEL API (api2.pointsyeah.com)
+//
+// The website's Explorer (award map) and hotel search are served by api2 with
+// the same Cognito token the live search uses, so no extra credentials are
+// needed. Responses are plain JSON — a second or two per call, versus 30-90s
+// for the browser-driven live search.
+// =============================================================================
+
+/** Gap between explorer calls; these hit the same API as the rest of the app. */
+const EXPLORER_MIN_INTERVAL_MS = 250;
+
+let lastExplorerCall = 0;
+let explorerChain: Promise<void> = Promise.resolve();
+
+async function explorerSlot(): Promise<void> {
+  const previous = explorerChain;
+  let release: () => void = () => {};
+  explorerChain = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await previous;
+  const elapsed = Date.now() - lastExplorerCall;
+  const wait = EXPLORER_MIN_INTERVAL_MS + Math.floor(Math.random() * 150) - elapsed;
+  if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+  lastExplorerCall = Date.now();
+  release();
+}
+
+async function api2Post<T>(path: string, body: unknown, idToken: string): Promise<T> {
+  await explorerSlot();
+  logDebug('explorer', `POST ${path}`);
+
+  const response = await fetch(`${API2_BASE}${path}`, {
+    method: 'POST',
+    headers: {
+      // The API expects the raw Cognito ID token, no Bearer prefix.
+      Authorization: idToken,
+      'Content-Type': 'application/json',
+      Origin: 'https://www.pointsyeah.com',
+      Referer: 'https://www.pointsyeah.com/',
+    },
+    body: JSON.stringify(body ?? {}),
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
+
+  if (!response.ok) {
+    throw new Error(`PointsYeah API ${path} failed: ${response.status} ${response.statusText}`);
+  }
+
+  const payload = (await response.json()) as {
+    code?: number;
+    success?: boolean;
+    error?: string;
+    message?: string;
+    data?: unknown;
+  };
+
+  if (payload.success === false) {
+    throw new Error(`PointsYeah API ${path} error: ${payload.error ?? payload.message ?? 'unknown'}`);
+  }
+  return (payload.data !== undefined ? payload.data : payload) as T;
+}
 
 // =============================================================================
 // RESULT FILTERS
@@ -190,11 +255,34 @@ export function applyResultFilters(
 // CLIENT INTERFACE
 // =============================================================================
 
+export interface AwardExplorerResult {
+  total: number;
+  results: unknown[];
+  [key: string]: unknown;
+}
+
+export interface HotelSearchResult {
+  total: number;
+  results: unknown[];
+  [key: string]: unknown;
+}
+
 export interface IPointsYeahClient {
   searchFlights(params: FlightSearchParams): Promise<FlightSearchResults>;
   getSearchHistory(): Promise<unknown>;
   findTransferBonuses(params: FindTransferBonusesParams): Promise<TransferBonusSearchResult>;
   findCheapestAwardDates(params: FindCheapestAwardDatesParams): Promise<CheapestAwardDatesResult>;
+  // Explorer + hotel API (api2, same Cognito token)
+  exploreAwardRoutes(body: Record<string, unknown>): Promise<AwardExplorerResult>;
+  exploreAwardAggregate(body: Record<string, unknown>): Promise<AwardExplorerResult>;
+  exploreAwardCount(): Promise<{ count: number }>;
+  exploreAwardRecommend(body: Record<string, unknown>): Promise<Record<string, unknown>>;
+  exploreFilterRange(body: Record<string, unknown>): Promise<Record<string, unknown>>;
+  searchHotels(body: Record<string, unknown>): Promise<HotelSearchResult>;
+  recommendHotels(body: Record<string, unknown>): Promise<HotelSearchResult>;
+  hotelMap(body: Record<string, unknown>): Promise<unknown>;
+  hotelCalendar(body: Record<string, unknown>): Promise<Record<string, unknown>>;
+  hotelDetail(body: Record<string, unknown>): Promise<Record<string, unknown>>;
 }
 
 function bonusEndDateLabel(unixSeconds: number | null | undefined): string | null {
@@ -382,6 +470,60 @@ export class PointsYeahClient implements IPointsYeahClient {
 
   async getSearchHistory(): Promise<unknown> {
     return this.withAuth((idToken) => getSearchHistory(idToken));
+  }
+
+  // --- Explorer (award map) and hotel search, both on api2 ---
+
+  async exploreAwardRoutes(body: Record<string, unknown>): Promise<AwardExplorerResult> {
+    return this.withAuth((idToken) => api2Post<AwardExplorerResult>('/explorer/search', body, idToken));
+  }
+
+  async exploreAwardAggregate(body: Record<string, unknown>): Promise<AwardExplorerResult> {
+    return this.withAuth((idToken) =>
+      api2Post<AwardExplorerResult>('/explorer/search/aggregate', body, idToken)
+    );
+  }
+
+  async exploreAwardCount(): Promise<{ count: number }> {
+    return this.withAuth((idToken) => api2Post<{ count: number }>('/explorer/count', {}, idToken));
+  }
+
+  async exploreAwardRecommend(body: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.withAuth((idToken) =>
+      api2Post<Record<string, unknown>>('/explorer/recommend', body, idToken)
+    );
+  }
+
+  async exploreFilterRange(body: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.withAuth((idToken) =>
+      api2Post<Record<string, unknown>>('/explorer/get_filter_range', body, idToken)
+    );
+  }
+
+  async searchHotels(body: Record<string, unknown>): Promise<HotelSearchResult> {
+    return this.withAuth((idToken) =>
+      api2Post<HotelSearchResult>('/hotel/explorer/search', body, idToken)
+    );
+  }
+
+  async recommendHotels(body: Record<string, unknown>): Promise<HotelSearchResult> {
+    return this.withAuth((idToken) =>
+      api2Post<HotelSearchResult>('/hotel/explorer/recommend', body, idToken)
+    );
+  }
+
+  async hotelMap(body: Record<string, unknown>): Promise<unknown> {
+    return this.withAuth((idToken) => api2Post<unknown>('/hotel/explorer/map', body, idToken));
+  }
+
+  async hotelCalendar(body: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.withAuth((idToken) =>
+      api2Post<Record<string, unknown>>('/hotel/explorer/calendar/v2', body, idToken)
+    );
+  }
+
+  async hotelDetail(body: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.withAuth((idToken) => api2Post<Record<string, unknown>>('/hotel/detail', body, idToken));
   }
 
   /**

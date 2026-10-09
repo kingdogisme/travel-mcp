@@ -1,19 +1,18 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import type { ClientFactory } from '../server.js';
-import { PointsYeahApiClient } from '../pointsyeah-api/client.js';
 import { HotelCalendarParamsSchema, HotelDetailParamsSchema } from '../pointsyeah-api/schemas.js';
 
 const CALENDAR_DESCRIPTION = `Show a hotel's daily award availability for a whole month.
 
 Give a property id (from search_hotels) and a month, and get each check-in date's points price, cash price and room type — the fastest way to see which nights are cheap on points.
 
-Requires a PointsYeah developer API key (premium tier).`;
+Uses the same PointsYeah login as the other tools.`;
 
 const DETAIL_DESCRIPTION = `Get a hotel property's details — images, address, phone and description — from its PointsYeah property id (found in search_hotels results).
 
-Requires a PointsYeah developer API key (premium tier).`;
+Uses the same PointsYeah login as the other tools.`;
 
-export function hotelCalendarTool(_server: Server, _clientFactory: ClientFactory) {
+export function hotelCalendarTool(_server: Server, clientFactory: ClientFactory) {
   return {
     name: 'hotel_availability_calendar',
     description: CALENDAR_DESCRIPTION,
@@ -28,7 +27,7 @@ export function hotelCalendarTool(_server: Server, _clientFactory: ClientFactory
     handler: async (args: unknown) => {
       try {
         const params = HotelCalendarParamsSchema.parse(args);
-        const result = await new PointsYeahApiClient().hotelCalendar({
+        const result = await clientFactory().hotelCalendar({
           property_id: params.propertyId,
           month: params.month,
         });
@@ -44,7 +43,7 @@ export function hotelCalendarTool(_server: Server, _clientFactory: ClientFactory
   };
 }
 
-export function hotelDetailTool(_server: Server, _clientFactory: ClientFactory) {
+export function hotelDetailTool(_server: Server, clientFactory: ClientFactory) {
   return {
     name: 'get_hotel_detail',
     description: DETAIL_DESCRIPTION,
@@ -58,7 +57,7 @@ export function hotelDetailTool(_server: Server, _clientFactory: ClientFactory) 
     handler: async (args: unknown) => {
       try {
         const params = HotelDetailParamsSchema.parse(args);
-        const result = await new PointsYeahApiClient().hotelDetail({
+        const result = await clientFactory().hotelDetail({
           property_id: params.propertyId,
         });
         return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };

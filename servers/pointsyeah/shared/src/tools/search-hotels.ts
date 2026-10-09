@@ -1,6 +1,5 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import type { ClientFactory } from '../server.js';
-import { PointsYeahApiClient } from '../pointsyeah-api/client.js';
 import { SearchHotelsParamsSchema } from '../pointsyeah-api/schemas.js';
 
 const DESCRIPTION = `Search hotel award availability (points and cash) with PointsYeah.
@@ -9,9 +8,9 @@ Returns hotels with the points price, the cash price, room type, the hotel's loy
 
 Give a place name ("Tokyo") or, for the most accurate results, a full location object with latitude/longitude and dest_type. Each result carries the property id you can feed to hotel_availability_calendar or get_hotel_detail.
 
-Requires a PointsYeah developer API key (premium tier): set POINTSYEAH_API_KEY or call set_api_key first. Fast — plain HTTP, no browser.`;
+Uses the same PointsYeah login as the other tools. Fast — plain HTTP, no browser.`;
 
-export function searchHotelsTool(_server: Server, _clientFactory: ClientFactory) {
+export function searchHotelsTool(_server: Server, clientFactory: ClientFactory) {
   return {
     name: 'search_hotels',
     description: DESCRIPTION,
@@ -79,7 +78,7 @@ export function searchHotelsTool(_server: Server, _clientFactory: ClientFactory)
             ? { label: params.location, value: params.location }
             : params.location;
 
-        const result = await new PointsYeahApiClient().hotelSearch({
+        const result = await clientFactory().searchHotels({
           location,
           start_date: params.startDate,
           end_date: params.endDate,

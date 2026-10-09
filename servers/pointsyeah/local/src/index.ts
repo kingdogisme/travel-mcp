@@ -4,7 +4,7 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createMCPServer, defaultClientFactory } from '../shared/index.js';
-import { setRefreshToken, setAuthenticated, setApiKey } from '../shared/state.js';
+import { setRefreshToken, setAuthenticated } from '../shared/state.js';
 import { refreshCognitoTokens } from '../shared/pointsyeah-client/lib/auth.js';
 import { logServerStart, logError, logWarning, logDebug } from '../shared/logging.js';
 
@@ -24,12 +24,6 @@ const VERSION = packageJson.version;
  * directing users to call set_refresh_token.
  */
 async function initializeAuth(): Promise<void> {
-  const envApiKey = process.env.POINTSYEAH_API_KEY;
-  if (envApiKey) {
-    setApiKey(envApiKey);
-    logDebug('config', 'PointsYeah developer API key loaded from environment');
-  }
-
   const envToken = process.env.POINTSYEAH_REFRESH_TOKEN;
 
   if (!envToken) {

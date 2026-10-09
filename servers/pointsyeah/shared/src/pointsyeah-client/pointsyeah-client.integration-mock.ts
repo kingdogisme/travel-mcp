@@ -1,4 +1,4 @@
-import type { IPointsYeahClient } from '../server.js';
+import type { IPointsYeahClient, AwardExplorerResult, HotelSearchResult } from '../server.js';
 import type {
   FlightSearchParams,
   FlightResult,
@@ -68,6 +68,48 @@ export function createIntegrationMockPointsYeahClient(
 
     async getSearchHistory(): Promise<unknown> {
       return mockData.searchHistory || [];
+    },
+
+    // Explorer + hotel endpoints (api2). The integration mock returns the
+    // canned shapes the real API uses so tool formatting can be exercised.
+    async exploreAwardRoutes(): Promise<AwardExplorerResult> {
+      return { total: 0, results: [] };
+    },
+
+    async exploreAwardAggregate(): Promise<AwardExplorerResult> {
+      return { total: 0, results: [] };
+    },
+
+    async exploreAwardCount(): Promise<{ count: number }> {
+      return { count: 0 };
+    },
+
+    async exploreAwardRecommend(): Promise<Record<string, unknown>> {
+      return { routes: [] };
+    },
+
+    async exploreFilterRange(): Promise<Record<string, unknown>> {
+      return { min_points: 0, max_points: 0, min_tax: 0, max_tax: 0 };
+    },
+
+    async searchHotels(): Promise<HotelSearchResult> {
+      return { total: 0, results: [] };
+    },
+
+    async recommendHotels(): Promise<HotelSearchResult> {
+      return { total: 0, results: [] };
+    },
+
+    async hotelMap(): Promise<unknown> {
+      return [];
+    },
+
+    async hotelCalendar(): Promise<Record<string, unknown>> {
+      return {};
+    },
+
+    async hotelDetail(): Promise<Record<string, unknown>> {
+      return {};
     },
 
     async findTransferBonuses(

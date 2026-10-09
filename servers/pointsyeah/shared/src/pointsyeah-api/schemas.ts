@@ -5,11 +5,23 @@ const CABINS = z.array(z.enum(['Economy', 'Premium Economy', 'Business', 'First'
 
 /** Place filter for the award explorer — every list is OR-ed together. */
 export const PlaceFilterSchema = z.object({
-  airports: z.array(z.string()).optional().describe('IATA airport codes, e.g. ["SFO", "OAK"]'),
-  countries: z.array(z.string()).optional().describe('Country names, e.g. ["Japan"]'),
-  continents: z.array(z.string()).optional().describe('Continent names, e.g. ["Asia"]'),
-  regions: z.array(z.string()).optional().describe('Region names, e.g. ["Southeast Asia"]'),
-  states: z.array(z.string()).optional().describe('State/province names, e.g. ["California"]'),
+  airports: z
+    .array(z.string())
+    .optional()
+    .describe('IATA airport codes, e.g. ["SFO", "OAK"]. Up to three per side.'),
+  countries: z
+    .array(z.string())
+    .optional()
+    .describe('ISO-2 country codes, e.g. ["JP", "KR"]. Full names do not match.'),
+  continents: z
+    .array(z.string())
+    .optional()
+    .describe('Two-letter continent codes: AS (Asia), EU (Europe), NA, SA, AF, OC'),
+  regions: z.array(z.string()).optional().describe('Region codes, where PointsYeah has them'),
+  states: z
+    .array(z.string())
+    .optional()
+    .describe('Two-letter state/province codes, e.g. ["CA"]. Full names do not match.'),
 });
 
 export const ExploreAwardRoutesParamsSchema = z.object({
@@ -104,3 +116,16 @@ export const HotelDetailParamsSchema = z.object({
 });
 
 export type HotelDetailParams = z.infer<typeof HotelDetailParamsSchema>;
+
+export const HotelRecommendParamsSchema = z.object({
+  location: z
+    .union([z.string(), HotelLocationSchema])
+    .describe('Place name or full location object'),
+  startDate: DATE.describe('Check-in date'),
+  endDate: DATE.describe('Check-out date'),
+  sort: z.enum(['points', 'cash', 'value']).default('points').describe('Ordering (default points)'),
+  page: z.number().int().min(1).default(1).describe('Page number (default 1)'),
+  pageSize: z.number().int().min(1).max(50).default(10).describe('Results per page (default 10)'),
+});
+
+export type HotelRecommendParams = z.infer<typeof HotelRecommendParamsSchema>;

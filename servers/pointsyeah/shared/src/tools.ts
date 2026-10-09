@@ -7,11 +7,11 @@ import { findCheapestAwardDatesTool } from './tools/find-cheapest-award-dates.js
 import { exploreAwardRoutesTool } from './tools/explore-award-routes.js';
 import { recommendAwardDestinationsTool } from './tools/recommend-award-destinations.js';
 import { searchHotelsTool } from './tools/search-hotels.js';
+import { recommendHotelsTool } from './tools/recommend-hotels.js';
 import { hotelCalendarTool, hotelDetailTool } from './tools/get-hotel-calendar.js';
-import { setApiKeyTool } from './tools/set-api-key.js';
 import { getSearchHistoryTool } from './tools/get-search-history.js';
 import { setRefreshTokenTool } from './tools/set-refresh-token.js';
-import { getServerState, setAuthenticated, clearRefreshToken, getApiKey } from './state.js';
+import { getServerState, setAuthenticated, clearRefreshToken } from './state.js';
 import { logWarning } from './logging.js';
 
 export type ToolGroup = 'readonly' | 'write' | 'admin';
@@ -65,6 +65,13 @@ const ALL_TOOLS: ToolDefinition[] = [
   // Live award probes that also hit external APIs
   { factory: findTransferBonusesTool, groups: ['write', 'admin'] },
   { factory: findCheapestAwardDatesTool, groups: ['write', 'admin'] },
+  // Award explorer and hotel search (api2 JSON endpoints, same login)
+  { factory: exploreAwardRoutesTool, groups: ['write', 'admin'] },
+  { factory: recommendAwardDestinationsTool, groups: ['write', 'admin'] },
+  { factory: searchHotelsTool, groups: ['write', 'admin'] },
+  { factory: recommendHotelsTool, groups: ['write', 'admin'] },
+  { factory: hotelCalendarTool, groups: ['write', 'admin'] },
+  { factory: hotelDetailTool, groups: ['write', 'admin'] },
   // Read-only tools - only query existing data
   { factory: getSearchHistoryTool, groups: ['readonly', 'write', 'admin'] },
 ];
@@ -72,20 +79,6 @@ const ALL_TOOLS: ToolDefinition[] = [
 const AUTH_REQUIRED_ERROR =
   'Authentication required. Please call the set_refresh_token tool first with a valid PointsYeah refresh token.';
 
-const API_KEY_REQUIRED_ERROR =
-  'PointsYeah developer API key required. Create one at pointsyeah.com/account/api-key (premium membership), then set POINTSYEAH_API_KEY or call the set_api_key tool.';
-
-/**
- * Tools backed by PointsYeah's public developer API rather than the website's
- * browser-driven live search. They need an API key, not a Cognito token.
- */
-const API_KEY_TOOLS: ToolFactory[] = [
-  exploreAwardRoutesTool,
-  recommendAwardDestinationsTool,
-  searchHotelsTool,
-  hotelCalendarTool,
-  hotelDetailTool,
-];
 
 /**
  * Creates a static tool registration system that exposes all tools at startup.
@@ -133,22 +126,8 @@ export function createRegisterTools(clientFactory: ClientFactory, enabledGroups?
       },
     }));
 
-    // Developer-API tools need an API key instead of the Cognito token
-    const apiKeyTools: Tool[] = API_KEY_TOOLS.map((factory) => {
-      const tool = factory(server, clientFactory);
-      return {
-        ...tool,
-        handler: async (args: unknown) => {
-          if (!getApiKey()) {
-            return { content: [{ type: 'text', text: API_KEY_REQUIRED_ERROR }], isError: true };
-          }
-          return await tool.handler(args);
-        },
-      };
-    });
-
     // All tools are always visible
-    const allTools = [...wrappedAuthedTools, ...apiKeyTools, authTool, setApiKeyTool()];
+    const allTools = [...wrappedAuthedTools, authTool];
 
     server.setRequestHandler(ListToolsRequestSchema, async () => ({
       tools: allTools.map((tool) => ({

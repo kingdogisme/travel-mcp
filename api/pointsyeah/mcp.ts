@@ -5,10 +5,9 @@ import {
   PointsYeahClient,
   setRefreshToken,
   setAuthenticated,
-  setApiKey,
 } from '../../servers/pointsyeah/shared/build/index.js';
 
-const VERSION = '0.4.0';
+const VERSION = '0.5.0';
 
 type NodeReq = IncomingMessage & { body?: unknown };
 
@@ -73,11 +72,6 @@ export default async function handler(req: NodeReq, res: ServerResponse) {
   if (envToken) {
     setRefreshToken(envToken);
     setAuthenticated(true);
-  }
-
-  const envApiKey = process.env.POINTSYEAH_API_KEY;
-  if (envApiKey) {
-    setApiKey(envApiKey);
   }
 
   const { server, registerHandlers } = createMCPServer({ version: VERSION });
