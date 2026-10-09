@@ -52,6 +52,22 @@ function serverlessClientFactory() {
 }
 
 export default async function handler(req: NodeReq, res: ServerResponse) {
+  // Stateless deployment: there are no server-initiated messages, so the GET
+  // SSE stream is not offered. The spec asks for 405 in that case.
+  if (req.method !== 'POST') {
+    res.statusCode = 405;
+    res.setHeader('allow', 'POST');
+    res.setHeader('content-type', 'application/json');
+    res.end(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        error: { code: -32000, message: 'Method Not Allowed. Use POST.' },
+        id: null,
+      })
+    );
+    return;
+  }
+
   const envToken = process.env.POINTSYEAH_REFRESH_TOKEN;
   if (envToken) {
     setRefreshToken(envToken);
