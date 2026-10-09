@@ -1047,22 +1047,54 @@ export function parsePriceHistory(ds1: any): PricePoint[] {
 
 const IATA_LIST_RE = /^[A-Za-z]{3}(?:\s*,\s*[A-Za-z]{3})*$/;
 
+// Metro codes for the big multi-airport cities. Google only sometimes exposes a
+// metro entry in the scraped page, and its suggestion list can omit the main
+// airport entirely (it returns STN,LCY,LGW,LTN for "London", dropping LHR), so
+// these common city names are resolved deterministically instead. Anything not
+// listed here falls back to findAirportCode.
+const CITY_METRO_CODES: Record<string, string> = {
+  london: 'LON',
+  'new york': 'NYC',
+  tokyo: 'TYO',
+  osaka: 'OSA',
+  paris: 'PAR',
+  milan: 'MIL',
+  rome: 'ROM',
+  moscow: 'MOW',
+  seoul: 'SEL',
+  beijing: 'BJS',
+  shanghai: 'SHA',
+  washington: 'WAS',
+  chicago: 'CHI',
+  toronto: 'YTO',
+  montreal: 'YMQ',
+  'sao paulo': 'SAO',
+  'rio de janeiro': 'RIO',
+  'buenos aires': 'BUE',
+  stockholm: 'STO',
+  jakarta: 'JKT',
+};
+
 /**
  * Accept a city or airport name as well as IATA codes. Anything that is not
- * already a 3-letter IATA list is resolved through findAirportCode: a metro
- * code is preferred when Google offers one ("Tokyo" -> TYO), otherwise the
- * top few airports are joined ("San Francisco" -> SFO).
+ * already a 3-letter IATA list is resolved through CITY_METRO_CODES first
+ * ("London" -> LON, "New York" -> NYC), then findAirportCode: a metro code is
+ * preferred when Google offers one, otherwise the top few airports are joined
+ * ("San Francisco" -> SFO,OAK).
  */
 export async function resolveAirportInput(value: string | string[]): Promise<string | string[]> {
   if (Array.isArray(value)) return value;
   const trimmed = value.trim();
   if (trimmed.length === 0 || IATA_LIST_RE.test(trimmed)) return trimmed;
 
+  const known = CITY_METRO_CODES[trimmed.toLowerCase().replace(/\s+/g, ' ')];
+  if (known) return known;
+
   const results = await findAirportCode(trimmed);
   if (results.length === 0) return trimmed;
 
-  const metro = results.find((result) => /metropolitan/i.test(result.name));
-  if (metro) return metro.code;
+  const scrapedMetro = results.find((result) => /metropolitan/i.test(result.name));
+  if (scrapedMetro) return scrapedMetro.code;
 
   const codes = [...new Set(results.map((result) => result.code.toUpperCase()))];
   return codes.slice(0, 4).join(',');
