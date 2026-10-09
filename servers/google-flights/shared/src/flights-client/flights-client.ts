@@ -985,6 +985,7 @@ export async function searchFlights(options: SearchFlightsOptions): Promise<Sear
     total_results: totalResults,
     search_url: url,
     price_insights: parsePriceInsights(ds1, html),
+    price_history: parsePriceHistory(ds1),
     showing: {
       offset: options.offset,
       count: paginated.length,

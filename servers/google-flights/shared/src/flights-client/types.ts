@@ -172,6 +172,8 @@ export interface SearchFlightsResult {
   /** The exact Google Flights URL this result was parsed from. */
   search_url: string;
   price_insights: PriceInsights | null;
+  /** Google's tracked low-price series for this route over the past ~60 days. */
+  price_history: PricePoint[];
   showing: { offset: number; count: number };
   has_more: boolean;
   next_offset: number | null;

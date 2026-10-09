@@ -139,6 +139,7 @@ Each offer also carries:
 - layovers: [{ airport, airport_name, minutes }] for every connection, so you can judge tight or long layovers.
 - emissions: { grams, typical_grams, delta_percent } — CO2e for the itinerary vs Google's typical figure for the route. Sort by "emissions" or filter with max_emissions_percent to prefer greener options.
 - price_insights (top level): Google's read on whether this route is currently cheap, with the tracked price range (range_low / range_high) and the current price.
+- price_history (top level): Google's own low-price series for the route over the past ~60 days, as { date, price } points — useful for "is now a good time to buy".
 
 Pagination: The response includes has_more (boolean) and next_offset (number or null). To get the next page, call search_flights again with the same parameters but set offset to next_offset. Keep paginating while has_more is true. Each page returns up to max_results flights.
 
