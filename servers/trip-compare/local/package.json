@@ -1,0 +1,29 @@
+{
+  "name": "trip-compare-mcp-server-local",
+  "version": "0.1.0",
+  "description": "Trip compare MCP server (points vs cash)",
+  "main": "build/index.js",
+  "type": "module",
+  "bin": {
+    "trip-compare-mcp-server": "./build/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node build/index.js",
+    "dev": "tsx src/index.ts",
+    "predev": "cd ../shared && npm run build && cd ../local && node setup-dev.js",
+    "prebuild": "cd ../shared && npm run build && cd ../local && node setup-dev.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "google-flights-mcp-server-shared": "*",
+    "pointsyeah-mcp-server-shared": "*",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.6",
+    "tsx": "^4.22.4",
+    "typescript": "^5.7.3"
+  },
+  "license": "MIT"
+}

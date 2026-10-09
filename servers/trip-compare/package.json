@@ -1,0 +1,22 @@
+{
+  "name": "trip-compare-mcp-server",
+  "version": "0.1.0",
+  "description": "MCP server that compares award (points) and cash prices for the same trip",
+  "author": "kingdogisme",
+  "license": "MIT",
+  "workspaces": [
+    "local",
+    "shared"
+  ],
+  "type": "module",
+  "scripts": {
+    "install-all": "npm install && cd local && npm install && cd ../shared && npm install",
+    "build": "node ../../scripts/build-mcp-server.js",
+    "dev": "cd local && npm run dev",
+    "test": "echo \"No tests yet\""
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kingdogisme/travel-mcp.git"
+  }
+}

@@ -14,6 +14,11 @@
       "maxDuration": 300,
       "memory": 2048,
       "includeFiles": "node_modules/@sparticuz/chromium/bin/**"
+    },
+    "api/trip-compare/mcp.ts": {
+      "maxDuration": 300,
+      "memory": 2048,
+      "includeFiles": "node_modules/@sparticuz/chromium/bin/**"
     }
   }
 }

@@ -1,7 +1,7 @@
 {
   "name": "travel-mcp",
   "version": "0.1.0",
-  "description": "Travel MCP servers monorepo - award flight search (PointsYeah) and Google Flights.",
+  "description": "Travel MCP servers monorepo - award flight search (PointsYeah), Google Flights, and a points-vs-cash trip comparison.",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -11,11 +11,13 @@
     "libs/elicitation"
   ],
   "scripts": {
-    "build": "npm run build:pointsyeah && npm run build:google-flights",
+    "build": "npm run build:google-flights && npm run build:pointsyeah && npm run build:trip-compare",
     "build:pointsyeah": "npm --prefix servers/pointsyeah run build",
     "build:google-flights": "npm --prefix servers/google-flights run build",
     "start:pointsyeah": "npm --prefix servers/pointsyeah/local run start",
-    "start:google-flights": "npm --prefix servers/google-flights/local run start"
+    "start:google-flights": "npm --prefix servers/google-flights/local run start",
+    "build:trip-compare": "npm --prefix servers/trip-compare run build",
+    "start:trip-compare": "npm --prefix servers/trip-compare/local run start"
   },
   "dependencies": {
     "@sparticuz/chromium": "^153.0.0",

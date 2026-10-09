@@ -10,6 +10,19 @@ export {
   type IPointsYeahClient,
 } from './server.js';
 
+// Flight search types
+export type {
+  FlightSearchParams,
+  FlightResult,
+  FlightRoute,
+  FlightPayment,
+  FlightSegment,
+  FlightSearchResults,
+  TransferOption,
+} from './types.js';
+export { FlightSearchParamsSchema } from './types.js';
+export { applyResultFilters } from './server.js';
+
 // State management exports
 export {
   getServerState,
