@@ -9,7 +9,7 @@ about and free to evolve independently.
 | Server | Package | Tools | Auth |
 | --- | --- | --- | --- |
 | [pointsyeah](./servers/pointsyeah) | `pointsyeah-mcp-server` | `search_flights`, `find_cheapest_award_dates`, `find_transfer_bonuses`, `explore_award_routes`, `recommend_award_destinations`, `get_search_history`, `manage_price_alerts`, `set_refresh_token` | PointsYeah Cognito refresh token (`POINTSYEAH_REFRESH_TOKEN`) |
-| [google-flights](./servers/google-flights) | `google-flights-mcp-server` | `search_flights`, `search_multi_city`, `get_date_grid`, `get_round_trip_grid`, `find_airport_code` | None |
+| [google-flights](./servers/google-flights) | `google-flights-mcp-server` | `search_flights`, `search_multi_city`, `get_date_grid`, `get_round_trip_grid`, `search_anywhere`, `find_airport_code` | None |
 | [trip-compare](./servers/trip-compare) | `trip-compare-mcp-server` | `compare_points_vs_cash` | PointsYeah token (for the award half) |
 
 - **pointsyeah** — award (points/miles) flight search across 20+ loyalty programs, with bank transfer options, flexible-date award pricing, and a live transfer-bonus finder.
@@ -62,7 +62,9 @@ and a booking token.
   lengths and prices each cell as its own round trip, returning the cheapest
   fare per (departure date, nights) plus the best date and best trip length.
   Live lookups are capped (default 12, hard max 18).
+- `search_anywhere` prices a set of candidate destinations (an explicit list, and/or regions such as "Japan" or "Hawaii" expanded into their airports) and ranks them by fare or duration, one polite lookup per destination (default 5, hard max 8).
 - `find_airport_code` resolves a city or airport name to IATA codes.
+- Origin and destination accept a city or airport name as well as IATA codes: "Tokyo" resolves to the metro code TYO, "London" to LON, "San Francisco" to SFO,OAK.
 
 ## Hosted endpoints (Vercel)
 

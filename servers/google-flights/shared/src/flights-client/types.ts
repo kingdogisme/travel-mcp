@@ -1,3 +1,76 @@
+
+/** One priced candidate destination for search_anywhere. */
+export interface AnywhereDestination {
+  /** Destination used in the query — an IATA code, or a comma-separated airport list. */
+  destination: string;
+  /** Airport or city name, when the candidate came from a region lookup. */
+  name?: string;
+  /** Region, country or city the candidate was expanded from, when any. */
+  region?: string;
+  /** Cheapest fare for this destination, or null when nothing matched. */
+  price: number | null;
+  currency: string;
+  airline: string | null;
+  stops: number | null;
+  duration_minutes: number | null;
+  departure: string | null;
+  arrival: string | null;
+  /** Total offers Google returned for this destination, before local filters. */
+  total_results: number;
+  search_url: string;
+}
+
+export interface SearchAnywhereOptions {
+  /** Where the trip starts. IATA code, city/airport name, or comma-separated list. */
+  origin: string;
+  departure_date: string;
+  return_date?: string;
+  trip_type: 'one_way' | 'round_trip';
+  /** Explicit candidate destinations, each an IATA code, city name or comma list. */
+  destinations?: string[];
+  /** Region, country or city names to expand into candidate airports, e.g. ["Japan"]. */
+  regions?: string[];
+  /** How many airports to take from each region (default 3). */
+  airports_per_region: number;
+  /** Hard cap on destinations priced in one call (default 5, hard max 8). */
+  max_destinations: number;
+  seat_class: SeatClass;
+  adults: number;
+  children: number;
+  currency: string;
+  exclude_basic_economy: boolean;
+  max_stops?: 'any' | 'nonstop' | '1' | '2';
+  max_price?: number;
+  exclude_redeye?: boolean;
+  require_checked_bag?: boolean;
+  max_layover_minutes?: number;
+  max_duration_minutes?: number;
+  /** How to order the priced destinations: cheapest first, or quickest first. */
+  sort_by: 'price' | 'duration';
+}
+
+export interface SearchAnywhereResult {
+  query: {
+    origin: string;
+    departure_date: string;
+    return_date?: string;
+    trip_type: 'one_way' | 'round_trip';
+    seat_class: SeatClass;
+    regions: string[];
+    destinations: string[];
+  };
+  /** Priced destinations, ordered by sort_by; destinations with no fare come last. */
+  destinations: AnywhereDestination[];
+  cheapest: AnywhereDestination | null;
+  /** Destinations that were priced but returned no matching fare. */
+  no_results: string[];
+  /** How many destinations were priced (one polite lookup each). */
+  searched_destinations: number;
+  /** True when the candidate list was longer than max_destinations. */
+  truncated: boolean;
+  currency: string;
+  notes: string[];
+}
 export interface FlightSegment {
   flight_number: string;
   airline: string;

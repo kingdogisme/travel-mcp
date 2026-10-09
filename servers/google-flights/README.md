@@ -17,11 +17,14 @@ MCP server for searching Google Flights. Provides flight search, date-price grid
 
 ### Tools
 
-| Tool                | Description                                                            |
-| ------------------- | ---------------------------------------------------------------------- |
-| `search_flights`    | Search for flights with full filtering, sorting, and pagination        |
-| `get_date_grid`     | Get a date-price grid showing the cheapest flight price for each day   |
-| `find_airport_code` | Look up airport IATA codes by city name, airport name, or partial code |
+| Tool                  | Description                                                            |
+| --------------------- | ---------------------------------------------------------------------- |
+| `search_flights`      | Search for flights with full filtering, sorting, and pagination        |
+| `search_multi_city`   | Price a 2-6 leg multi-city trip, one one-way search per leg            |
+| `get_date_grid`       | Get a date-price grid showing the cheapest flight price for each day   |
+| `get_round_trip_grid` | Cross a departure-date window with a range of trip lengths            |
+| `search_anywhere`     | Rank candidate destinations (explicit list and/or regions) by fare     |
+| `find_airport_code`   | Look up airport IATA codes by city name, airport name, or partial code |
 
 ### Resources
 

@@ -22,6 +22,9 @@ import type {
   RoundTripGridOptions,
   RoundTripGridResult,
   RoundTripGridEntry,
+  SearchAnywhereOptions,
+  SearchAnywhereResult,
+  AnywhereDestination,
 } from './types.js';
 import { logDebug, logWarning } from '../logging.js';
 
@@ -72,6 +75,8 @@ const MIN_REQUEST_INTERVAL_MS = 1500;
 const MAX_GRID_DATES = 14;
 /** Hard ceiling on live lookups per round-trip grid call. */
 const MAX_ROUND_TRIP_PAIRS = 18;
+/** Hard ceiling on destinations priced per search_anywhere call. */
+const MAX_ANYWHERE_DESTINATIONS = 8;
 const MAX_JITTER_MS = 900;
 const MAX_ATTEMPTS = 4;
 const BASE_BACKOFF_MS = 3000;
@@ -1281,6 +1286,146 @@ export async function searchMultiCity(options: SearchMultiCityOptions): Promise<
   }
 
   return { legs, cheapest_total: cheapestTotal, notes };
+}
+
+/**
+ * "Cheapest places to go" from one origin. Google's Explore map keeps its
+ * destination + price feed behind a BotGuard token that only a real browser
+ * session can mint, so instead of scraping Explore we price a candidate list:
+ * explicit destinations, and/or regions like "Japan" expanded into airports
+ * through findAirportCode. One polite lookup per destination, then ranked.
+ */
+export async function searchAnywhere(options: SearchAnywhereOptions): Promise<SearchAnywhereResult> {
+  const origin = String(await resolveAirportInput(options.origin));
+  const regions = (options.regions ?? []).map((region) => region.trim()).filter((region) => region.length > 0);
+  const explicit = options.destinations ?? [];
+  if (regions.length === 0 && explicit.length === 0) {
+    throw new Error('Provide at least one candidate: destinations and/or regions');
+  }
+
+  const notes: string[] = [];
+  const candidates: Array<{ destination: string; name?: string; region?: string }> = [];
+  const seen = new Set<string>();
+  const push = (destination: string, name?: string, region?: string) => {
+    const key = destination.toUpperCase();
+    if (key.length === 0 || seen.has(key)) return;
+    seen.add(key);
+    const entry: { destination: string; name?: string; region?: string } = { destination };
+    if (name) entry.name = name;
+    if (region) entry.region = region;
+    candidates.push(entry);
+  };
+
+  const perRegion = Math.max(1, options.airports_per_region);
+  for (const region of regions) {
+    const airports = await findAirportCode(region);
+    if (airports.length === 0) {
+      notes.push(`No airports found for "${region}".`);
+      continue;
+    }
+    for (const airport of airports.slice(0, perRegion)) {
+      push(airport.code.toUpperCase(), airport.name, region);
+    }
+  }
+  for (const destination of explicit) {
+    push(String(await resolveAirportInput(destination)));
+  }
+
+  const cap = Math.max(1, Math.min(options.max_destinations, MAX_ANYWHERE_DESTINATIONS));
+  const truncated = candidates.length > cap;
+  const selected = candidates.slice(0, cap);
+  if (truncated) {
+    notes.push(
+      `Candidate list had ${candidates.length} destinations; priced the first ${cap}. Raise max_destinations (hard max ${MAX_ANYWHERE_DESTINATIONS}) to cover more.`
+    );
+  }
+  if (selected.length === 0) {
+    throw new Error('No candidate destinations to price');
+  }
+
+  const results: AnywhereDestination[] = [];
+  const noResults: string[] = [];
+  for (const candidate of selected) {
+    try {
+      const result = await searchFlights({
+        origin,
+        destination: candidate.destination,
+        departure_date: options.departure_date,
+        return_date: options.return_date,
+        trip_type: options.trip_type,
+        seat_class: options.seat_class,
+        adults: options.adults,
+        children: options.children,
+        infants_in_seat: 0,
+        infants_on_lap: 0,
+        max_stops: options.max_stops ?? 'any',
+        sort_by: 'price',
+        max_results: 1,
+        offset: 0,
+        currency: options.currency,
+        exclude_basic_economy: options.exclude_basic_economy,
+        max_price: options.max_price,
+        exclude_redeye: options.exclude_redeye,
+        require_checked_bag: options.require_checked_bag,
+        max_layover_minutes: options.max_layover_minutes,
+        max_duration_minutes: options.max_duration_minutes,
+      });
+
+      const best = result.flights[0];
+      if (!best) noResults.push(candidate.destination);
+      results.push({
+        ...candidate,
+        price: best?.price ?? null,
+        currency: options.currency,
+        airline: best?.airline ?? null,
+        stops: best?.stops ?? null,
+        duration_minutes: best?.duration_minutes ?? null,
+        departure: best?.departure ?? null,
+        arrival: best?.arrival ?? null,
+        total_results: result.total_results,
+        search_url: result.search_url,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      notes.push(`Could not price ${candidate.destination}: ${message}`);
+    }
+  }
+
+  const byPrice = (entry: AnywhereDestination) => entry.price ?? Number.POSITIVE_INFINITY;
+  const byDuration = (entry: AnywhereDestination) => entry.duration_minutes ?? Number.POSITIVE_INFINITY;
+  const destinations = results.sort((a, b) =>
+    options.sort_by === 'duration'
+      ? byDuration(a) - byDuration(b) || byPrice(a) - byPrice(b)
+      : byPrice(a) - byPrice(b) || byDuration(a) - byDuration(b)
+  );
+
+  notes.push(`Priced ${selected.length} destination${selected.length === 1 ? '' : 's'} with one lookup each.`);
+  if (noResults.length > 0) {
+    notes.push(`No matching fare for: ${noResults.join(', ')}.`);
+  }
+  const cheapest = destinations.find((entry) => entry.price !== null) ?? null;
+  if (!cheapest) {
+    notes.push('None of the candidate destinations returned a matching fare.');
+  }
+
+  return {
+    query: {
+      origin,
+      departure_date: options.departure_date,
+      return_date: options.return_date,
+      trip_type: options.trip_type,
+      seat_class: options.seat_class,
+      regions,
+      destinations: selected.map((candidate) => candidate.destination),
+    },
+    destinations,
+    cheapest,
+    no_results: noResults,
+    searched_destinations: selected.length,
+    truncated,
+    currency: options.currency,
+    notes,
+  };
 }
 
 /**

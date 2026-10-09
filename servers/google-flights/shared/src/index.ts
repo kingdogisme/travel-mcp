@@ -17,6 +17,7 @@ export {
   buildTfsParam,
   searchMultiCity,
   getRoundTripGrid,
+  searchAnywhere,
 } from './flights-client/flights-client.js';
 export type {
   FlightOffer,
@@ -37,6 +38,9 @@ export type {
   RoundTripGridOptions,
   RoundTripGridResult,
   RoundTripGridEntry,
+  SearchAnywhereOptions,
+  SearchAnywhereResult,
+  AnywhereDestination,
 } from './flights-client/types.js';
 
 // Logging exports

@@ -4,6 +4,11 @@ All notable changes to the Google Flights MCP Server will be documented in this 
 
 ## [Unreleased]
 
+### Added
+
+- `search_anywhere`: prices a set of candidate destinations in one call and ranks them by fare (or duration). Candidates come from an explicit `destinations` list and/or `regions` (country, region or city names such as "Japan", "Thailand" or "Hawaii") expanded into their airports, capped by `max_destinations` (default 5, hard max 8). Each destination is one polite lookup; the response carries price, airline, stops, duration and times per destination, plus `cheapest`, `no_results` and `truncated`.
+- All flight tools accept a city or airport name for `origin` / `destination` as well as IATA codes: "Tokyo" resolves to the metro code TYO, "London" to LON and "San Francisco" to SFO,OAK. A curated map covers the big multi-airport cities; any other name falls back to the airport lookup.
+
 ## [0.2.6] - 2026-06-26
 
 ### Fixed

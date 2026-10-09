@@ -6,6 +6,7 @@ import { getDateGridTool } from './tools/get-date-grid.js';
 import { findAirportCodeTool } from './tools/find-airport-code.js';
 import { searchMultiCityTool } from './tools/search-multi-city.js';
 import { getRoundTripGridTool } from './tools/get-round-trip-grid.js';
+import { searchAnywhereTool } from './tools/search-anywhere.js';
 
 interface Tool {
   name: string;
@@ -28,6 +29,7 @@ const ALL_TOOLS: ToolFactory[] = [
   searchMultiCityTool,
   getDateGridTool,
   getRoundTripGridTool,
+  searchAnywhereTool,
   findAirportCodeTool,
 ];
 
