@@ -45,7 +45,7 @@ export type ExploreAwardRoutesParams = z.infer<typeof ExploreAwardRoutesParamsSc
 export const RecommendAwardDestinationsParamsSchema = z.object({
   departure: z
     .union([z.string(), z.array(z.string())])
-    .describe('Origin airport code(s), e.g. "SFO" or ["SFO", "OAK"]'),
+    .describe('Origin IATA code(s) or a city name, e.g. "SFO", ["SFO", "OAK"] or "Tokyo"'),
   cabins: CABINS.default(['Economy']).describe('Cabin classes to include'),
   today: DATE.optional().describe('Reference date (defaults to today)'),
   arrivalAnywhere: z.boolean().default(true).describe('Look for destinations anywhere'),

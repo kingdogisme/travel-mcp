@@ -1,6 +1,7 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import type { ClientFactory } from '../server.js';
 import { RecommendAwardDestinationsParamsSchema } from '../pointsyeah-api/schemas.js';
+import { resolvePlaceCode, resolvePlaceCodes } from '../places.js';
 
 const DESCRIPTION = `Recommend where to go on points from a given city.
 
@@ -17,7 +18,7 @@ export function recommendAwardDestinationsTool(_server: Server, clientFactory: C
       properties: {
         departure: {
           type: 'string',
-          description: 'Origin airport code (e.g. "SFO")',
+          description: 'Origin IATA code or city name (e.g. "SFO", "Tokyo")',
         },
         cabins: {
           type: 'array',
@@ -44,8 +45,8 @@ export function recommendAwardDestinationsTool(_server: Server, clientFactory: C
       try {
         const params = RecommendAwardDestinationsParamsSchema.parse(args);
         const departure = Array.isArray(params.departure)
-          ? { airports: params.departure }
-          : { airport: params.departure };
+          ? { airports: resolvePlaceCodes(params.departure) }
+          : { airport: resolvePlaceCode(params.departure) };
 
         const arrival = params.arrivalAnywhere
           ? { anywhere: true }

@@ -5,11 +5,11 @@ import type { FlightResult, FlightRoute } from '../types.js';
 
 const PARAM_DESCRIPTIONS = {
   departure:
-    'Origin airport or city code. Examples: "SFO", "NYC", "LAX", "ORD". ' +
-    'Use standard IATA airport codes or city codes.',
+    'Origin IATA airport or city code, or a city name. Examples: "SFO", "NYC", "Tokyo". ' +
+    'City names are resolved to their airport or metro code.',
   arrival:
-    'Destination airport or city code. Examples: "NYC", "LHR", "NRT". ' +
-    'Use standard IATA airport codes or city codes.',
+    'Destination IATA airport or city code, or a city name. Examples: "LHR", "NRT", "Tokyo". ' +
+    'City names are resolved to their airport or metro code.',
   departDate:
     'Outbound departure date in YYYY-MM-DD format. ' +
     'Example: "2026-04-01". Must be a future date.',

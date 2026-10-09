@@ -24,8 +24,8 @@ export interface CognitoAuthResult {
 // =============================================================================
 
 export const FlightSearchParamsSchema = z.object({
-  departure: z.string().min(1).describe('Origin airport or city code (e.g., "SFO", "NYC")'),
-  arrival: z.string().min(1).describe('Destination airport or city code (e.g., "NYC", "LAX")'),
+  departure: z.string().min(1).describe('Origin IATA code (e.g. "SFO", "NYC") or a city name (e.g. "Tokyo", "London")'),
+  arrival: z.string().min(1).describe('Destination IATA code (e.g. "NYC", "LAX") or a city name (e.g. "Tokyo", "London")'),
   departDate: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -212,8 +212,8 @@ export interface FlightSearchResults {
 // =============================================================================
 
 export const FindTransferBonusesParamsSchema = z.object({
-  origin: z.string().min(3).describe('Origin airport or city code used to probe for bonuses'),
-  destination: z.string().min(3).describe('Destination airport or city code'),
+  origin: z.string().min(3).describe('Origin IATA code or city name used to probe for bonuses'),
+  destination: z.string().min(3).describe('Destination IATA code or city name'),
   departDate: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -285,8 +285,8 @@ export interface TransferBonusSearchResult {
 // =============================================================================
 
 export const FindCheapestAwardDatesParamsSchema = z.object({
-  departure: z.string().min(1).describe('Origin airport or city code'),
-  arrival: z.string().min(1).describe('Destination airport or city code'),
+  departure: z.string().min(1).describe('Origin IATA code or city name'),
+  arrival: z.string().min(1).describe('Destination IATA code or city name'),
   departDate: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -380,12 +380,12 @@ export const ManagePriceAlertsParamsSchema = z.object({
     .describe('Alert id to remove (required when action="delete"; ids come from action="list")'),
 
   // --- create-only fields ---
-  origin: z.string().min(3).optional().describe('Origin airport code (required to create)'),
+  origin: z.string().min(3).optional().describe('Origin IATA code or city name (required to create)'),
   destination: z
     .string()
     .min(3)
     .optional()
-    .describe('Destination airport code (required to create)'),
+    .describe('Destination IATA code or city name (required to create)'),
   departDate: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)

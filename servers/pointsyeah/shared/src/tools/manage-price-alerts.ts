@@ -36,8 +36,8 @@ export function managePriceAlertsTool(_server: Server, clientFactory: () => IPoi
           type: 'string',
           description: 'Alert id to remove (required when action="delete")',
         },
-        origin: { type: 'string', description: 'Origin airport code, e.g. "SFO" (create)' },
-        destination: { type: 'string', description: 'Destination airport code, e.g. "NRT" (create)' },
+        origin: { type: 'string', description: 'Origin IATA code or city name, e.g. "SFO" or "Tokyo" (create)' },
+        destination: { type: 'string', description: 'Destination IATA code or city name, e.g. "NRT" or "Tokyo" (create)' },
         departDate: { type: 'string', description: 'Departure date YYYY-MM-DD (create)' },
         departDateTo: {
           type: 'string',

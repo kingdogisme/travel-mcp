@@ -20,6 +20,7 @@ import type {
 } from './types.js';
 import { FlightSearchParamsSchema } from './types.js';
 import { refreshCognitoTokens } from './pointsyeah-client/lib/auth.js';
+import { resolvePlaceCode, resolvePlaceCodes } from './places.js';
 import { createSearchTask } from './pointsyeah-client/lib/search.js';
 import type { PlaywrightSearchDeps } from './pointsyeah-client/lib/search.js';
 import { fetchSearchResults } from './pointsyeah-client/lib/fetch-results.js';
@@ -187,8 +188,8 @@ function buildPriceAlertPayload(params: ManagePriceAlertsParams): Record<string,
   return {
     filter_criteria: filterCriteria,
     info: {
-      departure: params.origin,
-      arrival: params.destination,
+      departure: params.origin ? resolvePlaceCode(params.origin) : params.origin,
+      arrival: params.destination ? resolvePlaceCode(params.destination) : params.destination,
       departureDate: params.departDate,
       departureDateSec: params.departDateTo ?? params.departDate,
       passengers_v2: { adults: params.adults, children: params.children },
@@ -488,6 +489,12 @@ export class PointsYeahClient implements IPointsYeahClient {
   }
 
   async searchFlights(params: FlightSearchParams): Promise<FlightSearchResults> {
+    // PointsYeah only accepts IATA codes, so city names are resolved here.
+    const resolved: FlightSearchParams = {
+      ...params,
+      departure: resolvePlaceCode(params.departure),
+      arrival: resolvePlaceCode(params.arrival),
+    };
     const tokens = await this.ensureTokens();
 
     // Step 1: Create search task via Playwright (handles encrypted request).
@@ -496,7 +503,7 @@ export class PointsYeahClient implements IPointsYeahClient {
     // re-launching the browser. The 5-minute refresh buffer in ensureTokens() mitigates
     // the risk of token expiry between refresh and browser navigation.
     const task = await createSearchTask(
-      params,
+      resolved,
       tokens.accessToken,
       tokens.idToken,
       this.refreshToken,
@@ -552,7 +559,7 @@ export class PointsYeahClient implements IPointsYeahClient {
 
     const unfiltered = Array.from(allResults.values());
     const stats: { droppedByCabin?: number } = {};
-    const results = applyResultFilters(unfiltered, params, stats);
+    const results = applyResultFilters(unfiltered, resolved, stats);
 
     const notes: string[] = [];
     if (stats.droppedByCabin) {
