@@ -6,11 +6,11 @@ export const GetDateGridSchema = z.object({
   origin: z
     .string()
     .min(3)
-    .describe('Origin airport IATA code (e.g., "SFO"), or comma-separated ("SFO,OAK")'),
+    .describe('Origin airport IATA code (e.g., "SFO"), a city name (e.g. "Tokyo"), or comma-separated ("SFO,OAK")'),
   destination: z
     .string()
     .min(3)
-    .describe('Destination airport IATA code (e.g., "LAX"), or comma-separated ("NRT,HND")'),
+    .describe('Destination airport IATA code (e.g., "LAX"), a city name (e.g. "Tokyo"), or comma-separated ("NRT,HND")'),
   departure_date: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -161,11 +161,11 @@ The grid typically covers ~60 days around the anchor date.`,
       properties: {
         origin: {
           type: 'string',
-          description: 'Origin airport IATA code (e.g., "SFO"), or comma-separated list',
+          description: 'Origin airport IATA code (e.g., "SFO"), a city name (e.g. "Tokyo"), or comma-separated list',
         },
         destination: {
           type: 'string',
-          description: 'Destination airport IATA code (e.g., "LAX"), or comma-separated list',
+          description: 'Destination airport IATA code (e.g., "LAX"), a city name (e.g. "Tokyo"), or comma-separated list',
         },
         departure_date: {
           type: 'string',

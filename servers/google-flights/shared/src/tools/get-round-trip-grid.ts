@@ -6,11 +6,11 @@ export const GetRoundTripGridSchema = z.object({
   origin: z
     .string()
     .min(3)
-    .describe('Origin airport IATA code (e.g., "SFO"), or comma-separated ("SFO,OAK")'),
+    .describe('Origin airport IATA code (e.g., "SFO"), a city name (e.g. "Tokyo"), or comma-separated ("SFO,OAK")'),
   destination: z
     .string()
     .min(3)
-    .describe('Destination airport IATA code (e.g., "NRT"), or comma-separated ("NRT,HND")'),
+    .describe('Destination airport IATA code (e.g., "NRT"), a city name (e.g. "Tokyo"), or comma-separated ("NRT,HND")'),
   start_date: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -102,10 +102,10 @@ Use get_date_grid first when only the departure date is flexible; use this when 
     inputSchema: {
       type: 'object' as const,
       properties: {
-        origin: { type: 'string', description: 'Origin IATA code, or comma-separated ("SFO,OAK")' },
+        origin: { type: 'string', description: 'Origin IATA code, a city name (e.g. "Tokyo"), or comma-separated ("SFO,OAK")' },
         destination: {
           type: 'string',
-          description: 'Destination IATA code, or comma-separated ("NRT,HND")',
+          description: 'Destination IATA code, a city name (e.g. "Tokyo"), or comma-separated ("NRT,HND")',
         },
         start_date: { type: 'string', description: 'First departure date YYYY-MM-DD' },
         end_date: { type: 'string', description: 'Last departure date YYYY-MM-DD' },

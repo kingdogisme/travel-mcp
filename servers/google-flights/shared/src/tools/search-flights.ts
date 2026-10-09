@@ -7,13 +7,13 @@ export const SearchFlightsSchema = z.object({
     .string()
     .min(3)
     .describe(
-      'Origin airport IATA code (e.g., "SFO"). Pass a comma-separated list to search several airports at once, e.g. "SFO,OAK,SJC".'
+      'Origin airport IATA code (e.g., "SFO"), a city or airport name (e.g. "Tokyo"), or a comma-separated list ("SFO,OAK,SJC"). City names resolve to their metro code or top airports.'
     ),
   destination: z
     .string()
     .min(3)
     .describe(
-      'Destination airport IATA code (e.g., "NRT"). Pass a comma-separated list to search several airports at once, e.g. "NRT,HND".'
+      'Destination airport IATA code (e.g., "NRT"), a city or airport name (e.g. "Tokyo"), or a comma-separated list ("NRT,HND"). City names resolve to their metro code or top airports.'
     ),
   departure_date: z
     .string()
@@ -188,7 +188,7 @@ Cabin handling: Google ignores the cabin enum inside its protobuf query, so busi
 
 Result-side filters Google's query cannot express are applied locally: airlines / exclude_airlines, alliances / exclude_alliances (Star Alliance, oneworld, SkyTeam), departure_after / departure_before, arrival_after / arrival_before (all "HH:MM" local time), max_duration_minutes, max_layover_minutes, layover_airports / exclude_layover_airports, and require_carry_on / require_checked_bag, max_price, exclude_redeye and aircraft_types / exclude_aircraft_types. total_results reflects the filtered count.
 
-Multiple airports per leg are supported (e.g. "SFO,OAK,SJC" as origin, "NRT,HND" as destination) — useful for metro areas with several airports.
+Multiple airports per leg are supported (e.g. "SFO,OAK,SJC" as origin, "NRT,HND" as destination) — useful for metro areas with several airports. City or airport names work too: "Tokyo" resolves to the metro code TYO, "London" to LON, and "New York" to JFK,LGA,NYC,SWF.
 
 Use find_airport_code first if you need to look up IATA airport codes.
 Use get_date_grid to find the cheapest dates before searching.`,
@@ -198,12 +198,12 @@ Use get_date_grid to find the cheapest dates before searching.`,
         origin: {
           type: 'string',
           description:
-            'Origin airport IATA code (e.g., "SFO"), or several comma-separated ("SFO,OAK,SJC")',
+            'Origin airport IATA code (e.g., "SFO"), a city or airport name (e.g. "Tokyo"), or several comma-separated ("SFO,OAK,SJC")',
         },
         destination: {
           type: 'string',
           description:
-            'Destination airport IATA code (e.g., "NRT"), or several comma-separated ("NRT,HND")',
+            'Destination airport IATA code (e.g., "NRT"), a city or airport name (e.g. "Tokyo"), or several comma-separated ("NRT,HND")',
         },
         departure_date: {
           type: 'string',

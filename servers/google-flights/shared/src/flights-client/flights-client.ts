@@ -17,6 +17,7 @@ import type {
   TripType,
   SearchMultiCityOptions,
   MultiCityResult,
+  MultiCityLeg,
   MultiCityLegResult,
   RoundTripGridOptions,
   RoundTripGridResult,
@@ -1044,12 +1045,38 @@ export function parsePriceHistory(ds1: any): PricePoint[] {
   return points;
 }
 
+const IATA_LIST_RE = /^[A-Za-z]{3}(?:\s*,\s*[A-Za-z]{3})*$/;
+
+/**
+ * Accept a city or airport name as well as IATA codes. Anything that is not
+ * already a 3-letter IATA list is resolved through findAirportCode: a metro
+ * code is preferred when Google offers one ("Tokyo" -> TYO), otherwise the
+ * top few airports are joined ("San Francisco" -> SFO).
+ */
+export async function resolveAirportInput(value: string | string[]): Promise<string | string[]> {
+  if (Array.isArray(value)) return value;
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || IATA_LIST_RE.test(trimmed)) return trimmed;
+
+  const results = await findAirportCode(trimmed);
+  if (results.length === 0) return trimmed;
+
+  const metro = results.find((result) => /metropolitan/i.test(result.name));
+  if (metro) return metro.code;
+
+  const codes = [...new Set(results.map((result) => result.code.toUpperCase()))];
+  return codes.slice(0, 4).join(',');
+}
+
 export async function searchFlights(options: SearchFlightsOptions): Promise<SearchFlightsResult> {
   // Note: max_stops filtering is done client-side after parsing results.
   // Sending maxStops=0 in the protobuf can cause Google to return empty results.
+  const origin = await resolveAirportInput(options.origin);
+  const destination = await resolveAirportInput(options.destination);
+  const resolved = { ...options, origin, destination };
   const { ds1, html, url, cabin_honored } = await fetchSearchPage({
-    origin: options.origin,
-    destination: options.destination,
+    origin: resolved.origin,
+    destination: resolved.destination,
     departure_date: options.departure_date,
     return_date: options.return_date,
     trip_type: options.trip_type,
@@ -1094,10 +1121,10 @@ export async function searchFlights(options: SearchFlightsOptions): Promise<Sear
 
   return {
     query: {
-      origin: options.origin,
-      destination: options.destination,
-      origins: parseAirportList(options.origin),
-      destinations: parseAirportList(options.destination),
+      origin: resolved.origin,
+      destination: resolved.destination,
+      origins: parseAirportList(resolved.origin),
+      destinations: parseAirportList(resolved.destination),
       departure_date: options.departure_date,
       return_date: options.return_date,
       trip_type: options.trip_type,
@@ -1146,9 +1173,12 @@ export async function searchMultiCity(options: SearchMultiCityOptions): Promise<
 
   const legs: MultiCityLegResult[] = [];
   for (const leg of options.legs) {
+    const origin = String(await resolveAirportInput(leg.origin));
+    const destination = String(await resolveAirportInput(leg.destination));
+    const resolvedLeg = { ...leg, origin, destination };
     const result = await searchFlights({
-      origin: leg.origin,
-      destination: leg.destination,
+      origin,
+      destination,
       departure_date: leg.date,
       trip_type: 'one_way',
       seat_class: options.seat_class,
@@ -1184,7 +1214,7 @@ export async function searchMultiCity(options: SearchMultiCityOptions): Promise<
     });
 
     legs.push({
-      leg,
+      leg: resolvedLeg,
       total_results: result.total_results,
       search_url: result.search_url,
       cabin_honored: result.query.cabin_honored,
@@ -1259,6 +1289,8 @@ function enumerateGridDates(options: GetDateGridOptions): { dates: string[]; tru
 
 export async function getDateGrid(options: GetDateGridOptions): Promise<DateGridResult> {
   const { dates, truncated } = enumerateGridDates(options);
+  const origin = await resolveAirportInput(options.origin);
+  const destination = await resolveAirportInput(options.destination);
 
   const samples: DateGridEntry[] = [];
   const noResults: string[] = [];
@@ -1269,8 +1301,8 @@ export async function getDateGrid(options: GetDateGridOptions): Promise<DateGrid
 
   for (const date of dates) {
     const page = await fetchSearchPage({
-      origin: options.origin,
-      destination: options.destination,
+      origin,
+      destination,
       departure_date: date,
       return_date: options.return_date,
       trip_type: options.trip_type,
@@ -1426,6 +1458,8 @@ export async function getRoundTripGrid(options: RoundTripGridOptions): Promise<R
   if (options.max_nights < options.min_nights) {
     throw new Error('max_nights must be greater than or equal to min_nights');
   }
+  const origin = await resolveAirportInput(options.origin);
+  const destination = await resolveAirportInput(options.destination);
 
   const start = new Date(`${options.start_date}T00:00:00Z`);
   const end = new Date(`${options.end_date}T00:00:00Z`);
@@ -1469,8 +1503,8 @@ export async function getRoundTripGrid(options: RoundTripGridOptions): Promise<R
 
   for (const cell of cells) {
     const page = await fetchSearchPage({
-      origin: options.origin,
-      destination: options.destination,
+      origin,
+      destination,
       departure_date: cell.departure_date,
       return_date: cell.return_date,
       trip_type: 'round_trip',

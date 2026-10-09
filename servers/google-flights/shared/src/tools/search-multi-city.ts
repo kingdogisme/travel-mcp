@@ -3,8 +3,8 @@ import type { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import type { FlightsClientFactory } from '../server.js';
 
 export const MultiCityLegSchema = z.object({
-  origin: z.string().min(3).describe('Leg origin airport IATA code (e.g. "SFO")'),
-  destination: z.string().min(3).describe('Leg destination airport IATA code (e.g. "NRT")'),
+  origin: z.string().min(3).describe('Leg origin airport IATA code (e.g. "SFO") or a city name (e.g. "Tokyo")'),
+  destination: z.string().min(3).describe('Leg destination airport IATA code (e.g. "NRT") or a city name (e.g. "Tokyo")'),
   date: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -120,7 +120,7 @@ Pass the legs in travel order, for example:
 
 All the usual filters apply to every leg: cabin, passengers, max_stops, airlines / exclude_airlines, alliances / exclude_alliances, time-of-day windows, max_duration_minutes, max_layover_minutes, layover_airports / exclude_layover_airports, require_carry_on / require_checked_bag, max_price, exclude_redeye, aircraft_types / exclude_aircraft_types and emissions.
 
-Note: each leg is a separate Google query, so expect roughly one fetch per leg.`,
+Each leg's origin and destination accept an IATA code, a comma-separated list, or a city name (e.g. "Tokyo"). Note: each leg is a separate Google query, so expect roughly one fetch per leg.`,
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -131,8 +131,8 @@ Note: each leg is a separate Google query, so expect roughly one fetch per leg.`
           items: {
             type: 'object',
             properties: {
-              origin: { type: 'string', description: 'Leg origin IATA code' },
-              destination: { type: 'string', description: 'Leg destination IATA code' },
+              origin: { type: 'string', description: 'Leg origin IATA code or city name' },
+              destination: { type: 'string', description: 'Leg destination IATA code or city name' },
               date: { type: 'string', description: 'Leg date YYYY-MM-DD' },
             },
             required: ['origin', 'destination', 'date'],
