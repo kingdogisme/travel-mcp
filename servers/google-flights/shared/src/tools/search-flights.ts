@@ -3,12 +3,18 @@ import type { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import type { FlightsClientFactory } from '../server.js';
 
 export const SearchFlightsSchema = z.object({
-  origin: z.string().min(3).max(3).describe('Origin airport IATA code (e.g., "SFO", "JFK", "LHR")'),
+  origin: z
+    .string()
+    .min(3)
+    .describe(
+      'Origin airport IATA code (e.g., "SFO"). Pass a comma-separated list to search several airports at once, e.g. "SFO,OAK,SJC".'
+    ),
   destination: z
     .string()
     .min(3)
-    .max(3)
-    .describe('Destination airport IATA code (e.g., "LAX", "LHR", "NRT")'),
+    .describe(
+      'Destination airport IATA code (e.g., "NRT"). Pass a comma-separated list to search several airports at once, e.g. "NRT,HND".'
+    ),
   departure_date: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -96,15 +102,22 @@ Each offer also carries:
 
 Pagination: The response includes has_more (boolean) and next_offset (number or null). To get the next page, call search_flights again with the same parameters but set offset to next_offset. Keep paginating while has_more is true. Each page returns up to max_results flights.
 
+Multiple airports per leg are supported (e.g. "SFO,OAK,SJC" as origin, "NRT,HND" as destination) — useful for metro areas with several airports.
+
 Use find_airport_code first if you need to look up IATA airport codes.
 Use get_date_grid to find the cheapest dates before searching.`,
     inputSchema: {
       type: 'object' as const,
       properties: {
-        origin: { type: 'string', description: 'Origin airport IATA code (e.g., "SFO")' },
+        origin: {
+          type: 'string',
+          description:
+            'Origin airport IATA code (e.g., "SFO"), or several comma-separated ("SFO,OAK,SJC")',
+        },
         destination: {
           type: 'string',
-          description: 'Destination airport IATA code (e.g., "LAX")',
+          description:
+            'Destination airport IATA code (e.g., "NRT"), or several comma-separated ("NRT,HND")',
         },
         departure_date: {
           type: 'string',

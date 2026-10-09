@@ -3,8 +3,14 @@ import type { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import type { FlightsClientFactory } from '../server.js';
 
 export const GetDateGridSchema = z.object({
-  origin: z.string().min(3).max(3).describe('Origin airport IATA code (e.g., "SFO")'),
-  destination: z.string().min(3).max(3).describe('Destination airport IATA code (e.g., "LAX")'),
+  origin: z
+    .string()
+    .min(3)
+    .describe('Origin airport IATA code (e.g., "SFO"), or comma-separated ("SFO,OAK")'),
+  destination: z
+    .string()
+    .min(3)
+    .describe('Destination airport IATA code (e.g., "LAX"), or comma-separated ("NRT,HND")'),
   departure_date: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -24,6 +30,49 @@ export const GetDateGridSchema = z.object({
     .max(3)
     .default('USD')
     .describe('Currency code for prices (e.g., "USD", "EUR")'),
+  start_date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional()
+    .describe('First date to price (YYYY-MM-DD). Defaults to departure_date.'),
+  end_date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional()
+    .describe('Last date to price (YYYY-MM-DD). Defaults to start_date.'),
+  return_date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional()
+    .describe('Return date, when pricing round trips'),
+  weekdays: z
+    .array(z.enum(['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']))
+    .optional()
+    .describe('Only price dates falling on these weekdays'),
+  sort: z
+    .enum(['date', 'price'])
+    .default('date')
+    .describe('Return the grid in chronological order or cheapest-first'),
+  max_results: z
+    .number()
+    .int()
+    .min(1)
+    .max(60)
+    .default(10)
+    .describe('How many entries to include in cheapest_dates'),
+  max_dates: z
+    .number()
+    .int()
+    .min(1)
+    .max(14)
+    .default(7)
+    .describe(
+      'How many dates to price with live searches (default 7, hard max 14). Each date costs one polite request.'
+    ),
+  exclude_basic_economy: z
+    .boolean()
+    .default(true)
+    .describe('Ignore basic-economy fares when picking the cheapest fare for a date'),
 });
 
 export function getDateGridTool(_server: Server, clientFactory: FlightsClientFactory) {
@@ -31,16 +80,23 @@ export function getDateGridTool(_server: Server, clientFactory: FlightsClientFac
     name: 'get_date_grid',
     description: `Get a date-price grid for a route showing the lowest flight price for each day.
 
-Returns an array of dates with their lowest prices, plus the overall cheapest date. Great for deal-hunting when the user has flexibility on travel dates — call this first to find the cheapest day, then use search_flights on that date.
+Prices each date in a window with a live Google Flights lookup and returns the cheapest itinerary per date, the overall cheapest date, and a cheapest_dates shortlist.
+
+Give it a window (start_date / end_date, optional weekdays filter) and it prices each date in turn — one polite request per date, capped by max_dates (default 7, hard max 14). Because every date is a real search, results are current rather than cached.
+
+The response also includes price_history, Google's own low-price series for the route over the past ~60 days, and price_insights with Google's read on whether prices are currently low, typical or high. Great for deal-hunting when the user has flexibility on travel dates — call this first to find the cheapest day, then use search_flights on that date.
 
 The grid typically covers ~60 days around the anchor date.`,
     inputSchema: {
       type: 'object' as const,
       properties: {
-        origin: { type: 'string', description: 'Origin airport IATA code (e.g., "SFO")' },
+        origin: {
+          type: 'string',
+          description: 'Origin airport IATA code (e.g., "SFO"), or comma-separated list',
+        },
         destination: {
           type: 'string',
-          description: 'Destination airport IATA code (e.g., "LAX")',
+          description: 'Destination airport IATA code (e.g., "LAX"), or comma-separated list',
         },
         departure_date: {
           type: 'string',
@@ -64,6 +120,31 @@ The grid typically covers ~60 days around the anchor date.`,
         currency: {
           type: 'string',
           description: 'Currency code for prices (default: USD)',
+        },
+        start_date: { type: 'string', description: 'First date to price (YYYY-MM-DD)' },
+        end_date: { type: 'string', description: 'Last date to price (YYYY-MM-DD)' },
+        return_date: { type: 'string', description: 'Return date for round-trip pricing' },
+        weekdays: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Only price dates falling on these weekdays (e.g. ["friday"])',
+        },
+        sort: {
+          type: 'string',
+          enum: ['date', 'price'],
+          description: 'Grid order: chronological (default) or cheapest first',
+        },
+        max_results: {
+          type: 'number',
+          description: 'How many entries to include in cheapest_dates (default 10)',
+        },
+        max_dates: {
+          type: 'number',
+          description: 'How many dates to price live (default 7, max 14)',
+        },
+        exclude_basic_economy: {
+          type: 'boolean',
+          description: 'Ignore basic-economy fares when picking a date\'s cheapest fare (default true)',
         },
       },
       required: ['origin', 'destination'],

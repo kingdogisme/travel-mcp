@@ -5,6 +5,7 @@ import type {
   FlightLayover,
   FlightEmissions,
   PriceInsights,
+  PricePoint,
   FlightExtensions,
   DateGridEntry,
   DateGridResult,
@@ -60,6 +61,8 @@ const DEFAULT_HEADERS: Record<string, string> = {
 // =============================================================================
 
 const MIN_REQUEST_INTERVAL_MS = 1500;
+/** Hard ceiling on live lookups per date-grid call — keeps us polite to Google. */
+const MAX_GRID_DATES = 14;
 const MAX_JITTER_MS = 900;
 const MAX_ATTEMPTS = 4;
 const BASE_BACKOFF_MS = 3000;
@@ -177,11 +180,13 @@ function getProtoRoot(): protobuf.Root {
 
   const Airport = new protobuf.Type('Airport').add(new protobuf.Field('airport', 2, 'string'));
 
+  // Google encodes multi-airport legs by repeating these fields, so they must be
+  // declared as repeated even though a single-airport search only sets one.
   const FlightData = new protobuf.Type('FlightData')
     .add(new protobuf.Field('date', 2, 'string'))
     .add(new protobuf.Field('maxStops', 9, 'int32', 'optional'))
-    .add(new protobuf.Field('fromFlight', 13, 'Airport'))
-    .add(new protobuf.Field('toFlight', 14, 'Airport'));
+    .add(new protobuf.Field('fromFlight', 13, 'Airport', 'repeated'))
+    .add(new protobuf.Field('toFlight', 14, 'Airport', 'repeated'));
 
   const Seat = new protobuf.Enum('Seat', {
     UNKNOWN_SEAT: 0,
@@ -223,9 +228,29 @@ function getProtoRoot(): protobuf.Root {
   return root;
 }
 
+/**
+ * Google accepts several airports per leg (the `from_flight` / `to_flight`
+ * fields are repeated). Accepts "SFO", "SFO,OAK" or ["SFO", "OAK"].
+ */
+export function parseAirportList(value: string | string[]): string[] {
+  const raw = Array.isArray(value) ? value : String(value).split(',');
+  const codes = raw
+    .map((code) => code.trim().toUpperCase())
+    .filter((code) => code.length > 0);
+  if (codes.length === 0) {
+    throw new Error('At least one airport code is required');
+  }
+  for (const code of codes) {
+    if (!/^[A-Z]{3}$/.test(code)) {
+      throw new Error(`Invalid airport code "${code}" — expected a 3-letter IATA code`);
+    }
+  }
+  return codes;
+}
+
 export async function buildTfsParam(options: {
-  origin: string;
-  destination: string;
+  origin: string | string[];
+  destination: string | string[];
   departureDate: string;
   returnDate?: string;
   tripType: TripType;
@@ -249,10 +274,13 @@ export async function buildTfsParam(options: {
   // Build flight legs
   const flightData: protobuf.Message[] = [];
 
+  const origins = parseAirportList(options.origin);
+  const destinations = parseAirportList(options.destination);
+
   const outboundLeg: Record<string, unknown> = {
     date: options.departureDate,
-    fromFlight: { airport: options.origin },
-    toFlight: { airport: options.destination },
+    fromFlight: origins.map((airport) => ({ airport })),
+    toFlight: destinations.map((airport) => ({ airport })),
   };
   if (options.maxStops !== undefined) {
     outboundLeg.maxStops = options.maxStops;
@@ -263,8 +291,8 @@ export async function buildTfsParam(options: {
   if (options.tripType === 'round_trip' && options.returnDate) {
     const returnLeg: Record<string, unknown> = {
       date: options.returnDate,
-      fromFlight: { airport: options.destination },
-      toFlight: { airport: options.origin },
+      fromFlight: destinations.map((airport) => ({ airport })),
+      toFlight: origins.map((airport) => ({ airport })),
     };
     if (options.maxStops !== undefined) {
       returnLeg.maxStops = options.maxStops;
@@ -673,9 +701,31 @@ function parsePriceInsights(ds1: any, html: string): PriceInsights | null {
 // PUBLIC API
 // =============================================================================
 
-export async function searchFlights(options: SearchFlightsOptions): Promise<SearchFlightsResult> {
-  // Note: max_stops filtering is done client-side after parsing results.
-  // Sending maxStops=0 in the protobuf can cause Google to return empty results.
+interface FetchedSearchPage {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ds1: any;
+  html: string;
+  url: string;
+}
+
+/**
+ * Build the Google Flights URL for a query, fetch it politely, and parse the
+ * embedded result payload. Shared by searchFlights and getDateGrid so both go
+ * through the same rate limiter.
+ */
+async function fetchSearchPage(options: {
+  origin: string | string[];
+  destination: string | string[];
+  departure_date: string;
+  return_date?: string;
+  trip_type: TripType;
+  seat_class: SeatClass;
+  adults: number;
+  children: number;
+  infants_in_seat: number;
+  infants_on_lap: number;
+  currency: string;
+}): Promise<FetchedSearchPage> {
   const tfs = await buildTfsParam({
     origin: options.origin,
     destination: options.destination,
@@ -698,6 +748,41 @@ export async function searchFlights(options: SearchFlightsOptions): Promise<Sear
       'Failed to parse Google Flights response. The page structure may have changed.'
     );
   }
+
+  return { ds1, html, url };
+}
+
+/** Parse the historical low-price series Google embeds (past ~60 days). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function parsePriceHistory(ds1: any): PricePoint[] {
+  const series = ds1?.[5]?.[10]?.[0];
+  if (!Array.isArray(series)) return [];
+
+  const points: PricePoint[] = [];
+  for (const entry of series) {
+    if (Array.isArray(entry) && typeof entry[0] === 'number' && typeof entry[1] === 'number') {
+      points.push({ date: new Date(entry[0]).toISOString().split('T')[0], price: entry[1] });
+    }
+  }
+  return points;
+}
+
+export async function searchFlights(options: SearchFlightsOptions): Promise<SearchFlightsResult> {
+  // Note: max_stops filtering is done client-side after parsing results.
+  // Sending maxStops=0 in the protobuf can cause Google to return empty results.
+  const { ds1, html, url } = await fetchSearchPage({
+    origin: options.origin,
+    destination: options.destination,
+    departure_date: options.departure_date,
+    return_date: options.return_date,
+    trip_type: options.trip_type,
+    seat_class: options.seat_class,
+    adults: options.adults,
+    children: options.children,
+    infants_in_seat: options.infants_in_seat,
+    infants_on_lap: options.infants_on_lap,
+    currency: options.currency,
+  });
 
   let allOffers = parseFlightOffers(ds1, options.currency);
 
@@ -731,6 +816,8 @@ export async function searchFlights(options: SearchFlightsOptions): Promise<Sear
     query: {
       origin: options.origin,
       destination: options.destination,
+      origins: parseAirportList(options.origin),
+      destinations: parseAirportList(options.destination),
       departure_date: options.departure_date,
       return_date: options.return_date,
       trip_type: options.trip_type,
@@ -743,6 +830,7 @@ export async function searchFlights(options: SearchFlightsOptions): Promise<Sear
       },
     },
     total_results: totalResults,
+    search_url: url,
     price_insights: parsePriceInsights(ds1, html),
     showing: {
       offset: options.offset,
@@ -755,63 +843,106 @@ export async function searchFlights(options: SearchFlightsOptions): Promise<Sear
   };
 }
 
+/**
+ * Enumerate the dates a caller asked for, honouring the weekday filter and the
+ * cap on how many live lookups we are willing to make in one call.
+ */
+function enumerateGridDates(options: GetDateGridOptions): { dates: string[]; truncated: boolean } {
+  const from = options.start_date ?? options.departure_date;
+  if (!from) {
+    throw new Error('start_date (or departure_date) is required for a date grid');
+  }
+  const to = options.end_date ?? from;
+
+  const start = new Date(`${from}T00:00:00Z`);
+  const end = new Date(`${to}T00:00:00Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    throw new Error('Invalid date range — expected YYYY-MM-DD');
+  }
+  if (end < start) {
+    throw new Error('end_date must not be before start_date');
+  }
+
+  const weekdays = options.weekdays?.map((day) => day.toLowerCase());
+  const all: string[] = [];
+  for (const cursor = new Date(start); cursor <= end; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
+    if (weekdays && weekdays.length > 0) {
+      const name = cursor
+        .toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' })
+        .toLowerCase();
+      if (!weekdays.includes(name)) continue;
+    }
+    all.push(cursor.toISOString().split('T')[0]);
+  }
+
+  const maxDates = Math.min(options.max_dates ?? 7, MAX_GRID_DATES);
+  return { dates: all.slice(0, maxDates), truncated: all.length > maxDates };
+}
+
 export async function getDateGrid(options: GetDateGridOptions): Promise<DateGridResult> {
-  // We need to make a search request to get the date grid data
-  // The date grid is embedded in the same response as flight results
-  const anchorDate =
-    options.departure_date ||
-    new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  const { dates, truncated } = enumerateGridDates(options);
 
-  const tfs = await buildTfsParam({
-    origin: options.origin,
-    destination: options.destination,
-    departureDate: anchorDate,
-    tripType: options.trip_type,
-    seatClass: options.seat_class,
-    adults: options.adults,
-    children: 0,
-    infantsInSeat: 0,
-    infantsOnLap: 0,
-  });
+  const samples: DateGridEntry[] = [];
+  const noResults: string[] = [];
+  let priceHistory: PricePoint[] = [];
+  let insights: PriceInsights | null = null;
+  let anchorUrl = '';
 
-  const url = buildFlightsUrl(tfs, options.currency);
-  const html = await rateLimitedFetch(url);
+  for (const date of dates) {
+    const page = await fetchSearchPage({
+      origin: options.origin,
+      destination: options.destination,
+      departure_date: date,
+      return_date: options.return_date,
+      trip_type: options.trip_type,
+      seat_class: options.seat_class,
+      adults: options.adults,
+      children: 0,
+      infants_in_seat: 0,
+      infants_on_lap: 0,
+      currency: options.currency,
+    });
 
-  const ds1 = extractDs1(html);
-  if (!ds1) {
-    throw new Error(
-      'Failed to parse Google Flights response. The page structure may have changed.'
-    );
-  }
-
-  const dateGrid: DateGridEntry[] = [];
-
-  // Date grid is at ds1[5][10][0] — array of [timestamp_ms, price] pairs
-  const calendarData = ds1?.[5]?.[10]?.[0];
-  if (Array.isArray(calendarData)) {
-    for (const entry of calendarData) {
-      if (Array.isArray(entry) && entry.length >= 2) {
-        const timestamp = entry[0];
-        const price = entry[1];
-        if (typeof timestamp === 'number' && typeof price === 'number') {
-          const date = new Date(timestamp).toISOString().split('T')[0];
-          dateGrid.push({ date, price });
-        }
-      }
+    if (!anchorUrl) {
+      anchorUrl = page.url;
+      priceHistory = parsePriceHistory(page.ds1);
+      insights = parsePriceInsights(page.ds1, page.html);
     }
+
+    let offers = parseFlightOffers(page.ds1, options.currency);
+    if (options.exclude_basic_economy) {
+      offers = offers.filter((offer) => !isBasicEconomy(offer));
+    }
+    if (offers.length === 0) {
+      noResults.push(date);
+      continue;
+    }
+
+    const best = offers.reduce((cheapest, offer) => (offer.price < cheapest.price ? offer : cheapest));
+    samples.push({
+      date,
+      price: best.price,
+      airline: best.airline,
+      stops: best.stops,
+      duration_minutes: best.duration_minutes,
+      emissions_delta_percent: best.emissions?.delta_percent ?? null,
+    });
   }
 
-  // Find cheapest
-  let cheapest: DateGridEntry | null = null;
-  for (const entry of dateGrid) {
-    if (!cheapest || entry.price < cheapest.price) {
-      cheapest = entry;
-    }
-  }
+  const byPrice = [...samples].sort((a, b) => a.price - b.price || a.date.localeCompare(b.date));
+  const limit = options.max_results ?? 10;
 
   return {
-    date_grid: dateGrid,
-    cheapest,
+    date_grid: options.sort === 'price' ? byPrice : samples,
+    cheapest: byPrice[0] ?? null,
+    cheapest_dates: byPrice.slice(0, limit),
+    date_range: samples.length > 0 ? { from: samples[0].date, to: samples[samples.length - 1].date } : null,
+    searched_dates: dates,
+    truncated,
+    no_results_dates: noResults,
+    price_history: priceHistory,
+    price_insights: insights,
+    search_url: anchorUrl,
     currency: options.currency,
   };
 }

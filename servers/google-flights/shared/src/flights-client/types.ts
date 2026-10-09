@@ -69,14 +69,35 @@ export interface FlightOffer {
   booking_token: string;
 }
 
-export interface DateGridEntry {
+export interface PricePoint {
   date: string;
   price: number;
 }
 
+export interface DateGridEntry extends PricePoint {
+  airline: string | null;
+  stops: number | null;
+  duration_minutes: number | null;
+  emissions_delta_percent: number | null;
+}
+
 export interface DateGridResult {
+  /** One live sample per requested date, cheapest itinerary found that day. */
   date_grid: DateGridEntry[];
   cheapest: DateGridEntry | null;
+  /** The N cheapest dates in the window, cheapest first. */
+  cheapest_dates: DateGridEntry[];
+  date_range: { from: string; to: string } | null;
+  /** The dates actually looked up (capped for politeness). */
+  searched_dates: string[];
+  /** True when the requested window had more dates than the lookup cap. */
+  truncated: boolean;
+  /** Dates inside the window where the search returned no itineraries. */
+  no_results_dates: string[];
+  /** Historical low-price series Google publishes for the route (past ~60 days). */
+  price_history: PricePoint[];
+  price_insights: PriceInsights | null;
+  search_url: string;
   currency: string;
 }
 
@@ -88,8 +109,9 @@ export interface AirportResult {
 }
 
 export interface SearchFlightsOptions {
-  origin: string;
-  destination: string;
+  /** Single code ("SFO") or several ("SFO,OAK" / ["SFO", "OAK"]). */
+  origin: string | string[];
+  destination: string | string[];
   departure_date: string;
   return_date?: string;
   trip_type: 'one_way' | 'round_trip';
@@ -110,8 +132,10 @@ export interface SearchFlightsOptions {
 
 export interface SearchFlightsResult {
   query: {
-    origin: string;
-    destination: string;
+    origin: string | string[];
+    destination: string | string[];
+    origins: string[];
+    destinations: string[];
     departure_date: string;
     return_date?: string;
     trip_type: string;
@@ -124,6 +148,8 @@ export interface SearchFlightsResult {
     };
   };
   total_results: number;
+  /** The exact Google Flights URL this result was parsed from. */
+  search_url: string;
   price_insights: PriceInsights | null;
   showing: { offset: number; count: number };
   has_more: boolean;
@@ -132,13 +158,29 @@ export interface SearchFlightsResult {
 }
 
 export interface GetDateGridOptions {
-  origin: string;
-  destination: string;
+  origin: string | string[];
+  destination: string | string[];
   departure_date?: string;
   trip_type: 'one_way' | 'round_trip';
   seat_class: 'economy' | 'premium_economy' | 'business' | 'first';
   adults: number;
   currency: string;
+  /** First date to price (YYYY-MM-DD). */
+  start_date?: string;
+  /** Last date to price (YYYY-MM-DD). Defaults to start_date. */
+  end_date?: string;
+  /** Return date for round-trip pricing. */
+  return_date?: string;
+  /** Restrict to specific weekdays, e.g. ["friday", "saturday"]. */
+  weekdays?: string[];
+  /** 'date' keeps chronological order, 'price' sorts cheapest first. */
+  sort?: 'date' | 'price';
+  /** How many entries to include in cheapest_dates (default 10). */
+  max_results?: number;
+  /** How many dates to look up live (default 7, hard max 14). */
+  max_dates?: number;
+  /** Drop dates whose cheapest fare is basic economy. */
+  exclude_basic_economy?: boolean;
 }
 
 export type SeatClass = 'economy' | 'premium_economy' | 'business' | 'first';
