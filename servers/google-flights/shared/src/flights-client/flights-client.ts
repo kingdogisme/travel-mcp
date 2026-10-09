@@ -948,8 +948,9 @@ export async function getDateGrid(options: GetDateGridOptions): Promise<DateGrid
 }
 
 export async function findAirportCode(query: string): Promise<AirportResult[]> {
-  // Use Google Flights search page to look up airports
-  // We search for flights from the query location to extract airport data from the response
+  // Google embeds airport entries in the flights page as
+  //   [["HND",0],"Haneda Airport",["/m/0gxs8","Tokyo",...]]
+  // so one request gives us code + name + city without a separate lookup API.
   const searchQuery = encodeURIComponent(query);
   const url = `https://www.google.com/travel/flights?q=${searchQuery}&hl=en`;
 
@@ -957,113 +958,37 @@ export async function findAirportCode(query: string): Promise<AirportResult[]> {
 
   const results: AirportResult[] = [];
   const seen = new Set<string>();
-  let match;
 
-  // Strategy 1: Extract from AF_initDataCallback data
-  // Airport entries appear as: ["SFO",0],"San Francisco International Airport"
-  // Also broader: ["SFO",0],"Name" followed by city/country data
-  const airportPattern =
-    /\["([A-Z]{3})",\d+\],"([^"]+(?:Airport|Aeropuerto|Aéroport|Flughafen)[^"]*)"/g;
-
-  while ((match = airportPattern.exec(html)) !== null) {
-    const code = match[1];
-    if (seen.has(code)) continue;
+  const push = (code: string, name: string, city: string, country: string) => {
+    if (seen.has(code)) return;
     seen.add(code);
-
-    const name = match[2];
-
-    // Try to extract city from the nearby context
-    const contextStart = Math.max(0, match.index - 500);
-    const contextEnd = Math.min(html.length, match.index + match[0].length + 500);
-    const context = html.substring(contextStart, contextEnd);
-
-    // Look for city/country info near the airport entry
-    const cityMatch = context.match(new RegExp(`"${code}"[^]]*?"(/m/[^"]+)"[^]]*?"([^"]+)"`));
-    const city = cityMatch?.[2] || '';
-
-    // Look for country code
-    const countryMatch = context.match(/"([A-Z]{2})"/);
-    const country = countryMatch?.[1] || '';
-
     results.push({ code, name, city, country });
+  };
+
+  // Strategy 1: structured entries, which carry the city.
+  const structured =
+    /\[+"([A-Z]{3})",0\],"([^"]+)",\["(\/m\/[^"]+)","([^"]+)"/g;
+  let match;
+  while ((match = structured.exec(html)) !== null) {
+    push(match[1], match[2], match[4], '');
   }
 
-  // Strategy 2: Extract from data-code HTML attributes with nearby airport names
+  // Strategy 2: entries without a city (still gives code + name).
+  const plain = /\[+"([A-Z]{3})",0\],"([^"]+)"/g;
+  while ((match = plain.exec(html)) !== null) {
+    push(match[1], match[2], '', '');
+  }
+
+  // Strategy 3: airport-name strings that appear outside the data payload.
   if (results.length === 0) {
-    const dataCodePattern = /data-code="([A-Z]{3})"/g;
-    while ((match = dataCodePattern.exec(html)) !== null) {
-      const code = match[1];
-      if (seen.has(code)) continue;
-      seen.add(code);
-
-      // Look for the airport name near this data-code attribute
-      const contextStart = Math.max(0, match.index - 200);
-      const contextEnd = Math.min(html.length, match.index + 500);
-      const context = html.substring(contextStart, contextEnd);
-
-      // Airport name often appears in aria-label or nearby text
-      const nameMatch = context.match(/aria-label="([^"]*Airport[^"]*)"/);
-      const name = nameMatch?.[1] || code;
-
-      results.push({ code, name, city: '', country: '' });
+    const named =
+      /\["([A-Z]{3})","([^"]*(?:International|Airport|Regional|Municipal)[^"]*)"/g;
+    while ((match = named.exec(html)) !== null) {
+      push(match[1], match[2], '', '');
     }
   }
 
-  // Strategy 3: Extract airport codes and names from the structured JS data
-  // Google embeds autocomplete data in script tags
-  if (results.length === 0) {
-    // Look for patterns like "ibnC6b" data-code="XXX" elements
-    // and also for ["XXX","Airport Name"] patterns in scripts
-    const jsPattern = /\["([A-Z]{3})","([^"]*(?:International|Airport|Regional|Municipal)[^"]*)"/g;
-    while ((match = jsPattern.exec(html)) !== null) {
-      const code = match[1];
-      if (seen.has(code)) continue;
-      seen.add(code);
-      results.push({ code, name: match[2], city: '', country: '' });
-    }
-  }
-
-  // Strategy 4: If still nothing, try making a flight search FROM the query to extract airport data
-  if (results.length === 0) {
-    // Build a search URL with the query as origin using a common destination
-    const tfs = await buildTfsParam({
-      origin: query.length === 3 ? query.toUpperCase() : 'SFO',
-      destination: query.length === 3 ? 'LAX' : query.length <= 3 ? query.toUpperCase() : 'LAX',
-      departureDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-      tripType: 'one_way',
-      seatClass: 'economy',
-      adults: 1,
-      children: 0,
-      infantsInSeat: 0,
-      infantsOnLap: 0,
-    });
-
-    const searchUrl = buildFlightsUrl(tfs, 'USD');
-    const searchHtml = await rateLimitedFetch(searchUrl);
-
-    // Extract all airport references from the search results
-    const allAirportPattern =
-      /\["([A-Z]{3})",\d+\],"([^"]*(?:Airport|Aeropuerto|Aéroport|Flughafen|International|Regional)[^"]*)"/g;
-    while ((match = allAirportPattern.exec(searchHtml)) !== null) {
-      const code = match[1];
-      if (seen.has(code)) continue;
-      seen.add(code);
-
-      const name = match[2];
-      const contextStart = Math.max(0, match.index - 500);
-      const contextEnd = Math.min(searchHtml.length, match.index + match[0].length + 500);
-      const context = searchHtml.substring(contextStart, contextEnd);
-
-      const cityMatch = context.match(new RegExp(`"${code}"[^]]*?"(/m/[^"]+)"[^]]*?"([^"]+)"`));
-      const city = cityMatch?.[2] || '';
-      const countryMatch = context.match(/"([A-Z]{2})"/);
-      const country = countryMatch?.[1] || '';
-
-      results.push({ code, name, city, country });
-    }
-  }
-
-  // Score and sort results by relevance to the query
+  // Score and sort results by relevance to the query.
   const queryLower = query.toLowerCase();
   const scored = results.map((r) => {
     let score = 0;
