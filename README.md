@@ -14,7 +14,7 @@ about and free to evolve independently.
 
 - **pointsyeah** — award (points/miles) flight search across 20+ loyalty programs, with bank transfer options, flexible-date award pricing, and a live transfer-bonus finder.
 - **google-flights** — cash-price flight search, date-price grids, airport IATA lookup, plus airline / time-of-day / duration / layover filters and cabin-aware pricing.
-- **trip-compare** — runs a cash search and an award search for the same trip, values each award in cents per point, and recommends points or cash.
+- **trip-compare** — runs a cash search and an award search for the same trip, values each award in cents per point (auto-detecting live transfer bonuses), and recommends points or cash. Pass `departDateTo` for a flexible departure window: it finds the cheapest cash day and the cheapest award day in the window, then compares on the cheapest cash day.
 
 Together they cover both sides of the same question: "what does this trip cost
 in points vs. in cash?"

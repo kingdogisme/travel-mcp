@@ -8,7 +8,7 @@ This runs two live searches in one call:
 - Google Flights for the cheapest cash fares in the requested cabin
 - PointsYeah for live award availability across 20+ loyalty programs
 
-It then values each award option in cents per point — (cash fare - award taxes) / miles — and recommends points or cash. Set transferBonusPercent when a bank transfer bonus is active (e.g. 30 for a 30% bonus) to see the improved value on options you can transfer into.
+It then values each award option in cents per point — (cash fare - award taxes) / miles — and recommends points or cash. Transfer bonuses are detected automatically: each award option is valued with the live bonus PointsYeah reports for that bank-to-program pairing, and the applied bonus is shown on the option (transfer_bonus) and in the verdict. Pass transferBonusPercent to override with a specific bonus, or useTransferBonuses: false to ignore bonuses entirely.
 
 Use this when the user asks "should I use points or pay cash?", "is this redemption worth it?", or wants to compare a specific route and date. Expect 30-90 seconds, because the award side drives a real browser.`;
 
@@ -29,6 +29,11 @@ export function comparePointsVsCashTool(_server: Server, clientFactory: TripComp
         },
         departDate: { type: 'string', description: 'Departure date YYYY-MM-DD' },
         returnDate: { type: 'string', description: 'Return date YYYY-MM-DD (omit for one-way)' },
+        departDateTo: {
+          type: 'string',
+          description:
+            'Optional end of a flexible departure window (YYYY-MM-DD). When set, the tool first finds the cheapest cash day and the cheapest award day in the window, then compares on the cheapest cash day. Slower, since it adds a cash date grid and an award date-window search.',
+        },
         cabin: {
           type: 'string',
           enum: ['Economy', 'Premium Economy', 'Business', 'First'],
@@ -43,6 +48,11 @@ export function comparePointsVsCashTool(_server: Server, clientFactory: TripComp
         transferBonusPercent: {
           type: 'number',
           description: 'Active transfer bonus percent to model, e.g. 30',
+        },
+        useTransferBonuses: {
+          type: 'boolean',
+          description:
+            'Auto-detect live transfer bonuses from the award search (default true). Set false to ignore bonuses.',
         },
         pointsLimit: { type: 'number', description: 'How many award options to include (default 8)' },
         cashLimit: { type: 'number', description: 'How many cash fares to include (default 5)' },

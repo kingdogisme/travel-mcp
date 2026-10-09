@@ -12,6 +12,13 @@ export const CompareOptionsSchema = z.object({
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .optional()
     .describe('Return date in YYYY-MM-DD (omit for one-way)'),
+  departDateTo: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional()
+    .describe(
+      'Optional end of a flexible departure window. When set (and after departDate), the tool first finds the cheapest cash day and the cheapest award day in the window, then runs the full comparison on the cheapest cash day.'
+    ),
   cabin: z
     .enum(['Economy', 'Premium Economy', 'Business', 'First'])
     .default('Business')
@@ -35,6 +42,12 @@ export const CompareOptionsSchema = z.object({
     .optional()
     .describe(
       'Active transfer bonus to model, e.g. 30 for a 30% bonus. Reduces the effective points cost.'
+    ),
+  useTransferBonuses: z
+    .boolean()
+    .default(true)
+    .describe(
+      'When true (default) and no transferBonusPercent is given, value each award using the live transfer bonus PointsYeah reported on that route. Set false to ignore bonuses.'
     ),
   pointsLimit: z
     .number()
@@ -84,6 +97,15 @@ export interface AwardOption {
   cents_per_point: number | null;
   /** Same, but assuming a transfer bonus inflates each transferred point. */
   cents_per_point_with_bonus: number | null;
+  /** Miles after the applied transfer bonus (null when no bonus applies). */
+  effective_miles: number | null;
+  /** The live transfer bonus applied to this option, when one applies. */
+  transfer_bonus: {
+    bank: string;
+    percentage: number;
+    end_date: string | null;
+    slogan: string;
+  } | null;
 }
 
 export interface CompareResult {
@@ -115,4 +137,17 @@ export interface CompareResult {
     reason: string;
   };
   transfer_bonus_percent: number | null;
+  /** True when bonuses came from the live search rather than a manual override. */
+  auto_transfer_bonuses: boolean;
+  /** Present only when a departure window (departDateTo) was given. */
+  window: {
+    depart_date_to: string;
+    /** Cheapest cash day found in the window. */
+    cash: { date: string | null; price: number | null; airline: string | null } | null;
+    /** Cheapest award day found in the window. */
+    points: { date: string | null; miles: number | null; program: string | null; tax: number | null } | null;
+    /** The date the points-vs-cash comparison actually ran on. */
+    compared_date: string;
+    note: string;
+  } | null;
 }
