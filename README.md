@@ -8,14 +8,43 @@ about and free to evolve independently.
 
 | Server | Package | Tools | Auth |
 | --- | --- | --- | --- |
-| [pointsyeah](./servers/pointsyeah) | `pointsyeah-mcp-server` | `search_flights`, `get_search_history`, `set_refresh_token` | PointsYeah Cognito refresh token (`POINTSYEAH_REFRESH_TOKEN`) |
+| [pointsyeah](./servers/pointsyeah) | `pointsyeah-mcp-server` | `search_flights`, `find_cheapest_award_dates`, `find_transfer_bonuses`, `get_search_history`, `set_refresh_token` | PointsYeah Cognito refresh token (`POINTSYEAH_REFRESH_TOKEN`) |
 | [google-flights](./servers/google-flights) | `google-flights-mcp-server` | `search_flights`, `get_date_grid`, `find_airport_code` | None |
+| [trip-compare](./servers/trip-compare) | `trip-compare-mcp-server` | `compare_points_vs_cash` | PointsYeah token (for the award half) |
 
-- **pointsyeah** — award (points/miles) flight search across 20+ loyalty programs, with bank transfer options.
-- **google-flights** — cash-price flight search, date-price grids, and airport IATA lookup.
+- **pointsyeah** — award (points/miles) flight search across 20+ loyalty programs, with bank transfer options, flexible-date award pricing, and a live transfer-bonus finder.
+- **google-flights** — cash-price flight search, date-price grids, airport IATA lookup, plus airline / time-of-day / duration / layover filters and cabin-aware pricing.
+- **trip-compare** — runs a cash search and an award search for the same trip, values each award in cents per point, and recommends points or cash.
 
 Together they cover both sides of the same question: "what does this trip cost
 in points vs. in cash?"
+
+### What each server can search
+
+**pointsyeah** (`search_flights`): one-way, round-trip and two-leg multi-city
+award searches; scoped to specific banks (`banks`) or airline programs
+(`airlineProgram`); flexible date windows (`multiday` + `departDateTo`); and
+local result filters (`maxMiles`, `maxTax`, `maxStops`, `minSeats`,
+`maxLayoverMinutes`, `excludeRedeye`, `sortBy`, `limit`).
+
+- `find_cheapest_award_dates` prices a whole window of departure dates in one
+  flexible-date search and reports the cheapest award per day plus the cheapest
+  program per date.
+- `find_transfer_bonuses` harvests live bank transfer bonuses (percentage,
+  expiry, PointsYeah's slogan, effective points cost) off a single award search.
+
+**google-flights** (`search_flights`): multi-airport legs (`"SFO,OAK"`),
+one-way and round-trip, all four cabins, stop limits, emissions-aware sorting,
+and local filters for `airlines` / `exclude_airlines`, `departure_after` /
+`departure_before`, `arrival_after` / `arrival_before`, `max_duration_minutes`
+and `max_layover_minutes`. Every offer carries segments, layovers, emissions
+and a booking token.
+
+- `get_date_grid` prices each date in a window with a live lookup (default 7
+  dates, hard cap 14) and returns the cheapest itinerary per date, the cheapest
+  dates, Google's historical low-price series and its price verdict. It accepts
+  the same airline / time / duration / layover filters.
+- `find_airport_code` resolves a city or airport name to IATA codes.
 
 ## Hosted endpoints (Vercel)
 
@@ -25,6 +54,7 @@ Production: **https://travel-mcp-mocha.vercel.app**
 | --- | --- |
 | `POST /api/pointsyeah/mcp` | streamable HTTP (stateless, JSON responses) |
 | `POST /api/google-flights/mcp` | streamable HTTP (stateless, JSON responses) |
+| `POST /api/trip-compare/mcp` | streamable HTTP (stateless, JSON responses) |
 | `GET /api/health` | service status |
 
 The functions in [`api/`](./api) wrap the same `shared` server code that the
@@ -35,9 +65,9 @@ Serverless notes:
 
 - `POINTSYEAH_REFRESH_TOKEN` is set as an encrypted Vercel env var for the
   project, so the pointsyeah endpoint is authenticated on every cold start.
-- The pointsyeah function runs a real Chromium in the function sandbox via
-  `@sparticuz/chromium` + `playwright-core`; `vercel.json` bundles the Chromium
-  binaries and raises the function limit to 300s / 2048 MB.
+- The pointsyeah and trip-compare functions run a real Chromium in the function
+  sandbox via `@sparticuz/chromium` + `playwright-core`; `vercel.json` bundles
+  the Chromium binaries and raises the function limit to 300s / 2048 MB.
 - Pushes to `main` deploy automatically (the project is Git-linked).
 
 Connecting it to ChatGPT: add a custom MCP server pointing at
@@ -71,6 +101,7 @@ Per-server:
 ```bash
 npm --prefix servers/pointsyeah run build
 npm --prefix servers/google-flights run build
+npm --prefix servers/trip-compare run build
 ```
 
 Run a server over stdio:
@@ -78,6 +109,7 @@ Run a server over stdio:
 ```bash
 node servers/pointsyeah/local/build/index.js
 node servers/google-flights/local/build/index.js
+node servers/trip-compare/local/build/index.js
 ```
 
 ## MCP client config (example)
@@ -93,10 +125,29 @@ node servers/google-flights/local/build/index.js
     "google-flights": {
       "command": "node",
       "args": ["servers/google-flights/local/build/index.js"]
+    },
+    "trip-compare": {
+      "command": "node",
+      "args": ["servers/trip-compare/local/build/index.js"],
+      "env": { "POINTSYEAH_REFRESH_TOKEN": "<token>" }
     }
   }
 }
 ```
+
+## Behaviour notes
+
+- **Cabins.** Google ignores the cabin enum inside its protobuf query, so
+  business and first searches are issued through Google's natural-language
+  endpoint, which honours the cabin but returns a smaller fare list. Premium
+  economy is not understood there; when that happens the response carries
+  `cabin_honored: false` and a note in `notes`.
+- **PointsYeah filters.** PointsYeah applies neither the cabin nor the airline
+  program filter server-side, so both are enforced locally and the response
+  says how many options were hidden.
+- **Politeness.** Google Flights requests are serialized with a ~1.5s gap plus
+  jitter, retried with exponential backoff on 429/403/5xx and on consent or
+  captcha interstitials, and the date grid caps live lookups per call.
 
 ## Notes
 
