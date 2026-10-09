@@ -1,0 +1,67 @@
+# Dependencies
+node_modules
+.npm
+.npm-cache
+.pnp.*
+.pnp/
+
+# Git worktree helper files
+.gw-install.log
+
+# Build outputs
+build/
+*.tsbuildinfo
+
+# TypeScript compiled files in source directories
+**/*.js
+**/*.js.map
+**/*.d.ts
+**/*.d.ts.map
+# Exclude build directories from the above patterns
+!**/build/**
+!**/node_modules/**
+# Keep helper scripts
+!**/prepare-publish.js
+!**/setup-dev.js
+!**/prepare-npm-readme.js
+# Keep all scripts in scripts directories
+!**/scripts/**/*.js
+
+# Ignore shared symlinks in local directories
+**/local/shared
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# Linting
+.eslintcache 
+
+.vscode/tasks.json
+
+# MCP configuration - never commit this file as it may contain secrets
+.mcp.json
+mcp-json-profiles/.secrets
+
+# Temporary test result files
+**/tests/manual/temp-results/
+
+# Test publish directories
+**/.test-publish/
+
+# Claude skills - auto-generated, should not be version-controlled
+**/.claude/skills/

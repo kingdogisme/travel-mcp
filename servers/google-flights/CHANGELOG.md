@@ -1,0 +1,71 @@
+# Changelog
+
+All notable changes to the Google Flights MCP Server will be documented in this file.
+
+## [Unreleased]
+
+## [0.2.6] - 2026-06-26
+
+### Fixed
+
+- Stop over-excluding legitimate economy fares when `exclude_basic_economy` is enabled (the default). The filter previously dropped every fare Google ranks in the lowest tier (`fare_brand` "Economy"), but on many international routes Google labels standard, fully-amenitied economy as the lowest tier. For example, the United SFO→CTS nonstop (UA234) is tier 1 yet includes a free checked bag and is surfaced as a normal option on Google's web UI — it was being silently removed, hiding the cheapest itinerary. A fare is now treated as basic economy only when it is the lowest fare tier **and** includes no free checked bag (`extensions.checked_bags_included === 0`). Google's carry-on flag is frequently `null` on these fares, so checked-bag inclusion is the dependable signal that a fare is the bare-bones basic-economy product the filter targets. Truly restrictive basic-economy fares (no free checked bag) are still excluded.
+
+## [0.2.5] - 2026-06-14
+
+### Fixed
+
+- Raised the `zod` dependency floor from `^3.24.1` to `^3.25.76` so `npx` can no longer resolve a zod version that lacks the `zod/v4` subpath export. `@modelcontextprotocol/sdk@^1.29` imports `zod/v4` (first shipped in zod 3.25.0); the previous floor permitted zod 3.24.x, which has no `zod/v4` export and intermittently crashed server startup under `npx ...@latest` with `ERR_UNSUPPORTED_DIR_IMPORT`.
+
+## [0.2.4] - 2026-05-17
+
+### Fixed
+
+- Set `mcpName` in `local/package.json` to `com.pulsemcp/<server>` so the MCP Registry can validate npm-package ownership and successfully publish this server.
+
+## [0.2.3] - 2026-05-13
+
+### Security
+
+- Bump `protobufjs` from 7.5.5 → 7.5.8 to pick up upstream parser/input hardening fixes (protobufjs PRs #2173, #2236, #2245). Google Flights uses `protobufjs` only to encode internal request parameters with a programmatic schema (no `.proto` file parsing or decoding of untrusted input), so the operational impact is low; bump is taken as defense-in-depth so consumers of `google-flights-mcp-server` receive the patched library.
+
+## [0.2.2] - 2026-04-12
+
+- Migration verification: no-op patch version bump to validate internal→public distribution pipeline
+
+## [0.2.1] - 2026-03-07
+
+### Fixed
+
+- Include "best flights" (Google's featured/highlighted flights) in search results. Previously, only the "other flights" section was parsed from Google's response, causing ~3 flights per search to be silently dropped — including flights that Google considers the best options for the route. This affected both one-way and round-trip searches.
+- Add defensive deduplication by `booking_token` when merging best and other flight sections to guard against potential duplicates from Google's undocumented API.
+
+## [0.2.0] - 2026-03-06
+
+### Added
+
+- `exclude_basic_economy` parameter on `search_flights` (default: `true`). Basic economy fares are now excluded by default since they typically have significant restrictions (no carry-on, no seat selection, non-refundable). Set to `false` to include all fare tiers.
+
+## [0.1.2] - 2026-02-22
+
+### Added
+
+- `fare_brand` field on each flight result indicating the fare tier ("Economy", "Economy+", "Economy Flex"), derived from Google's numeric fare tier data. May be `null` when unavailable.
+- `extensions` field on each flight result with `carry_on_included` (boolean) and `checked_bags_included` (number) to help distinguish basic economy from standard fares.
+
+## [0.1.1] - 2026-02-16
+
+### Changed
+
+- Renamed npm package from `google-flights-google-mcp-server` to `google-flights-mcp-server`
+
+## [0.1.0] - 2026-02-16
+
+### Added
+
+- Initial implementation of Google Flights MCP server
+- `search_flights` tool with full configurability: trip type, seat class, passenger counts, max stops, sorting, pagination, and currency
+- `get_date_grid` tool returning a date-price grid for finding the cheapest travel dates
+- `find_airport_code` tool for looking up IATA airport codes by city name, airport name, or partial code
+- Protobuf-based search parameter encoding (no API key required)
+- Built-in rate limiting (1.5s between requests) to avoid Google rate limits
+- Manual test suite covering domestic, international, transpacific, business class, pagination, and filtering

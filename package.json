@@ -1,0 +1,20 @@
+{
+  "name": "travel-mcp",
+  "version": "0.1.0",
+  "description": "Travel MCP servers monorepo - award flight search (PointsYeah) and Google Flights.",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "workspaces": [
+    "servers/*/local",
+    "servers/*/shared",
+    "libs/elicitation"
+  ],
+  "scripts": {
+    "build": "npm run build:pointsyeah && npm run build:google-flights",
+    "build:pointsyeah": "npm --prefix servers/pointsyeah run build",
+    "build:google-flights": "npm --prefix servers/google-flights run build",
+    "start:pointsyeah": "npm --prefix servers/pointsyeah/local run start",
+    "start:google-flights": "npm --prefix servers/google-flights/local run start"
+  }
+}
