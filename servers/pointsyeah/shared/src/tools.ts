@@ -2,6 +2,8 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { ClientFactory } from './server.js';
 import { searchFlightsTool } from './tools/search-flights.js';
+import { findTransferBonusesTool } from './tools/find-transfer-bonuses.js';
+import { findCheapestAwardDatesTool } from './tools/find-cheapest-award-dates.js';
 import { getSearchHistoryTool } from './tools/get-search-history.js';
 import { setRefreshTokenTool } from './tools/set-refresh-token.js';
 import { getServerState, setAuthenticated, clearRefreshToken } from './state.js';
@@ -55,6 +57,9 @@ interface ToolDefinition {
 const ALL_TOOLS: ToolDefinition[] = [
   // Flight search queries external APIs, classified as write operation
   { factory: searchFlightsTool, groups: ['write', 'admin'] },
+  // Live award probes that also hit external APIs
+  { factory: findTransferBonusesTool, groups: ['write', 'admin'] },
+  { factory: findCheapestAwardDatesTool, groups: ['write', 'admin'] },
   // Read-only tools - only query existing data
   { factory: getSearchHistoryTool, groups: ['readonly', 'write', 'admin'] },
 ];

@@ -7,7 +7,7 @@ import {
   setAuthenticated,
 } from '../../servers/pointsyeah/shared/build/index.js';
 
-const VERSION = '0.2.9';
+const VERSION = '0.3.0';
 
 type NodeReq = IncomingMessage & { body?: unknown };
 

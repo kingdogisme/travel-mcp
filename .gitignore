@@ -30,6 +30,10 @@ build/
 # Ignore shared symlinks in local directories
 **/local/shared
 
+# Local scratch probes
+tmp-*.mjs
+tmp-*.ts
+
 # Logs
 logs
 *.log

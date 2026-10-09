@@ -19,8 +19,18 @@ export type {
   FlightSegment,
   FlightSearchResults,
   TransferOption,
+  TransferBonus,
+  TransferBonusSearchResult,
+  FindTransferBonusesParams,
+  AwardDateOption,
+  CheapestAwardDatesResult,
+  FindCheapestAwardDatesParams,
 } from './types.js';
-export { FlightSearchParamsSchema } from './types.js';
+export {
+  FlightSearchParamsSchema,
+  FindTransferBonusesParamsSchema,
+  FindCheapestAwardDatesParamsSchema,
+} from './types.js';
 export { applyResultFilters } from './server.js';
 
 // State management exports

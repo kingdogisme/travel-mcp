@@ -261,6 +261,7 @@ export function searchFlightsTool(_server: Server, clientFactory: () => IPointsY
             (searchResults.unfiltered_total !== searchResults.total
               ? ` (from ${searchResults.unfiltered_total} before filters)`
               : ''),
+          ...(searchResults.notes ?? []).map((note) => `**Note:** ${note}`),
           '',
         ];
 
