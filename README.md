@@ -8,7 +8,7 @@ about and free to evolve independently.
 
 | Server | Package | Tools | Auth |
 | --- | --- | --- | --- |
-| [pointsyeah](./servers/pointsyeah) | `pointsyeah-mcp-server` | `search_flights`, `find_cheapest_award_dates`, `find_transfer_bonuses`, `get_search_history`, `set_refresh_token` | PointsYeah Cognito refresh token (`POINTSYEAH_REFRESH_TOKEN`) |
+| [pointsyeah](./servers/pointsyeah) | `pointsyeah-mcp-server` | `search_flights`, `find_cheapest_award_dates`, `find_transfer_bonuses`, `explore_award_routes`, `recommend_award_destinations`, `search_hotels`, `hotel_availability_calendar`, `get_hotel_detail`, `get_search_history`, `set_refresh_token`, `set_api_key` | PointsYeah Cognito refresh token (`POINTSYEAH_REFRESH_TOKEN`) + developer API key (`POINTSYEAH_API_KEY`) |
 | [google-flights](./servers/google-flights) | `google-flights-mcp-server` | `search_flights`, `get_date_grid`, `find_airport_code` | None |
 | [trip-compare](./servers/trip-compare) | `trip-compare-mcp-server` | `compare_points_vs_cash` | PointsYeah token (for the award half) |
 
@@ -32,6 +32,20 @@ local result filters (`maxMiles`, `maxTax`, `maxStops`, `minSeats`,
   program per date.
 - `find_transfer_bonuses` harvests live bank transfer bonuses (percentage,
   expiry, PointsYeah's slogan, effective points cost) off a single award search.
+- `explore_award_routes`, `recommend_award_destinations`, `search_hotels`,
+  `hotel_availability_calendar` and `get_hotel_detail` use PointsYeah's public
+  developer API (`ai-api.pointsyeah.com`) — plain JSON over HTTPS, so they
+  answer in seconds. They need an API key: create one at
+  `pointsyeah.com/account/api-key` (premium tier, 1000 calls/day), then set
+  `POINTSYEAH_API_KEY` or call the `set_api_key` tool. Without a key they return
+  a message saying exactly that.
+  - `explore_award_routes` searches awards across whole regions — airports,
+    countries, continents, regions or states on each end, plus a date window.
+  - `recommend_award_destinations` answers "where can I go on points from SFO?".
+  - `search_hotels` returns hotel award availability with points price, cash
+    price, room type, loyalty program, brand and transfer partners.
+  - `hotel_availability_calendar` shows a property's points price per night for
+    a month; `get_hotel_detail` returns images, address and description.
 
 **google-flights** (`search_flights`): multi-airport legs (`"SFO,OAK"`),
 one-way and round-trip, all four cabins, stop limits, emissions-aware sorting,
@@ -65,6 +79,9 @@ Serverless notes:
 
 - `POINTSYEAH_REFRESH_TOKEN` is set as an encrypted Vercel env var for the
   project, so the pointsyeah endpoint is authenticated on every cold start.
+- `POINTSYEAH_API_KEY` (optional) enables the developer-API tools — the award
+  explorer, destination recommendations and hotel search. Add it the same way
+  once you have created a key.
 - The pointsyeah and trip-compare functions run a real Chromium in the function
   sandbox via `@sparticuz/chromium` + `playwright-core`; `vercel.json` bundles
   the Chromium binaries and raises the function limit to 300s / 2048 MB.
@@ -120,7 +137,10 @@ node servers/trip-compare/local/build/index.js
     "pointsyeah": {
       "command": "node",
       "args": ["servers/pointsyeah/local/build/index.js"],
-      "env": { "POINTSYEAH_REFRESH_TOKEN": "<token>" }
+      "env": {
+        "POINTSYEAH_REFRESH_TOKEN": "<token>",
+        "POINTSYEAH_API_KEY": "<optional developer API key>"
+      }
     },
     "google-flights": {
       "command": "node",
@@ -145,6 +165,10 @@ node servers/trip-compare/local/build/index.js
 - **PointsYeah filters.** PointsYeah applies neither the cabin nor the airline
   program filter server-side, so both are enforced locally and the response
   says how many options were hidden.
+- **Developer API.** The award explorer and hotel tools talk to
+  `ai-api.pointsyeah.com` with an `X-API-Key` header. Calls are serialized with a
+  short gap, retried on 429/5xx, and a 403 is reported as "the key was rejected
+  (premium tier required)". `POINTSYEAH_API_BASE` overrides the base URL.
 - **Politeness.** Google Flights requests are serialized with a ~1.5s gap plus
   jitter, retried with exponential backoff on 429/403/5xx and on consent or
   captcha interstitials, and the date grid caps live lookups per call.

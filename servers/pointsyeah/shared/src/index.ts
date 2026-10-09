@@ -40,7 +40,33 @@ export {
   setRefreshToken,
   clearRefreshToken,
   resetState,
+  setApiKey,
+  getApiKey,
+  clearApiKey,
 } from './state.js';
+
+// PointsYeah developer API (ai-api.pointsyeah.com)
+export {
+  PointsYeahApiClient,
+  MissingApiKeyError,
+  API_BASE,
+} from './pointsyeah-api/client.js';
+export type {
+  PlaceFilter,
+  ExplorerSearchBody,
+  HotelSearchBody,
+  HotelLocation,
+  AwardExplorerResult,
+  HotelSearchResult,
+} from './pointsyeah-api/client.js';
+export {
+  PlaceFilterSchema,
+  ExploreAwardRoutesParamsSchema,
+  RecommendAwardDestinationsParamsSchema,
+  SearchHotelsParamsSchema,
+  HotelCalendarParamsSchema,
+  HotelDetailParamsSchema,
+} from './pointsyeah-api/schemas.js';
 
 // Logging exports
 export { logServerStart, logError, logWarning, logDebug } from './logging.js';
