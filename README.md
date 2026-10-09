@@ -114,6 +114,7 @@ Requires Node.js 18+.
 ```bash
 npm install          # installs workspace deps
 npm run build        # builds shared then local for every server
+npm test             # unit tests (vitest), no network calls
 ```
 
 Per-server:

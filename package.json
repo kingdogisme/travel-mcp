@@ -12,6 +12,8 @@
   ],
   "scripts": {
     "build": "npm run build:google-flights && npm run build:pointsyeah && npm run build:trip-compare",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "build:pointsyeah": "npm --prefix servers/pointsyeah run build",
     "build:google-flights": "npm --prefix servers/google-flights run build",
     "start:pointsyeah": "npm --prefix servers/pointsyeah/local run start",
@@ -22,5 +24,8 @@
   "dependencies": {
     "@sparticuz/chromium": "^153.0.0",
     "playwright-core": "^1.64.0"
+  },
+  "devDependencies": {
+    "vitest": "^5.0.3"
   }
 }

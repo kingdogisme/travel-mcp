@@ -1288,6 +1288,20 @@ export async function searchMultiCity(options: SearchMultiCityOptions): Promise<
   return { legs, cheapest_total: cheapestTotal, notes };
 }
 
+/** Order priced destinations, cheapest (or quickest) first; unpriced ones last. */
+export function rankAnywhereDestinations(
+  entries: AnywhereDestination[],
+  sortBy: 'price' | 'duration'
+): AnywhereDestination[] {
+  const byPrice = (entry: AnywhereDestination) => entry.price ?? Number.POSITIVE_INFINITY;
+  const byDuration = (entry: AnywhereDestination) => entry.duration_minutes ?? Number.POSITIVE_INFINITY;
+  return [...entries].sort((a, b) =>
+    sortBy === 'duration'
+      ? byDuration(a) - byDuration(b) || byPrice(a) - byPrice(b)
+      : byPrice(a) - byPrice(b) || byDuration(a) - byDuration(b)
+  );
+}
+
 /**
  * "Cheapest places to go" from one origin. Google's Explore map keeps its
  * destination + price feed behind a BotGuard token that only a real browser
@@ -1391,13 +1405,7 @@ export async function searchAnywhere(options: SearchAnywhereOptions): Promise<Se
     }
   }
 
-  const byPrice = (entry: AnywhereDestination) => entry.price ?? Number.POSITIVE_INFINITY;
-  const byDuration = (entry: AnywhereDestination) => entry.duration_minutes ?? Number.POSITIVE_INFINITY;
-  const destinations = results.sort((a, b) =>
-    options.sort_by === 'duration'
-      ? byDuration(a) - byDuration(b) || byPrice(a) - byPrice(b)
-      : byPrice(a) - byPrice(b) || byDuration(a) - byDuration(b)
-  );
+  const destinations = rankAnywhereDestinations(results, options.sort_by);
 
   notes.push(`Priced ${selected.length} destination${selected.length === 1 ? '' : 's'} with one lookup each.`);
   if (noResults.length > 0) {
@@ -1606,7 +1614,20 @@ export async function findAirportCode(query: string): Promise<AirportResult[]> {
 }
 
 // For testing: export the internal parser
-export { extractDs1, parseFlightOffers, formatTime, formatDate, filterByStops };
+export {
+  extractDs1,
+  parseFlightOffers,
+  formatTime,
+  formatDate,
+  filterByStops,
+  detectBlock,
+  minutesOfDay,
+  withinWindow,
+  addDays,
+  sampleDates,
+  enumerateGridDates,
+  parsePriceLevel,
+};
 
 function addDays(date: string, days: number): string {
   const cursor = new Date(`${date}T00:00:00Z`);
