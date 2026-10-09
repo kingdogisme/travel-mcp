@@ -53,7 +53,7 @@ export function createIntegrationMockPointsYeahClient(
         },
       ];
 
-      return { total: results.length, results };
+      return { total: results.length, unfiltered_total: results.length, results };
     },
 
     async getSearchHistory(): Promise<unknown> {

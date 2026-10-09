@@ -5,6 +5,7 @@ import { getServerState } from './state.js';
 import type {
   FlightSearchParams,
   FlightResult,
+  FlightRoute,
   FlightSearchResults,
   CognitoTokens,
 } from './types.js';
@@ -14,6 +15,143 @@ import type { PlaywrightSearchDeps } from './pointsyeah-client/lib/search.js';
 import { fetchSearchResults } from './pointsyeah-client/lib/fetch-results.js';
 import { getSearchHistory } from './pointsyeah-client/lib/user-api.js';
 import { logDebug, logWarning } from './logging.js';
+
+// =============================================================================
+// RESULT FILTERS
+//
+// PointsYeah returns every program it searched; these filters trim the payload
+// locally so the caller only sees options that fit their constraints.
+// =============================================================================
+
+function layoverMinutes(route: FlightRoute): number[] {
+  const segments = route.segments ?? [];
+  const gaps: number[] = [];
+  for (let i = 1; i < segments.length; i++) {
+    const arrived = Date.parse(segments[i - 1].at);
+    const departs = Date.parse(segments[i].dt);
+    if (Number.isNaN(arrived) || Number.isNaN(departs)) continue;
+    gaps.push(Math.round((departs - arrived) / 60000));
+  }
+  return gaps;
+}
+
+function routeDurationMinutes(route: FlightRoute): number {
+  const segments = route.segments ?? [];
+  if (segments.length === 0) return Number.POSITIVE_INFINITY;
+  const start = Date.parse(segments[0].dt);
+  const end = Date.parse(segments[segments.length - 1].at);
+  if (Number.isNaN(start) || Number.isNaN(end)) {
+    return segments.reduce((sum, segment) => sum + (segment.duration || 0), 0);
+  }
+  return Math.round((end - start) / 60000);
+}
+
+function isRedeye(route: FlightRoute): boolean {
+  const first = route.segments?.[0];
+  if (!first) return false;
+  const hour = Number(first.dt.split('T')[1]?.substring(0, 2));
+  if (Number.isNaN(hour)) return false;
+  return hour >= 21 || hour < 5;
+}
+
+function routePassesFilters(route: FlightRoute, params: FlightSearchParams): boolean {
+  const payment = route.payment;
+  const segments = route.segments ?? [];
+
+  if (params.maxMiles !== undefined && (payment === null || payment.miles > params.maxMiles)) {
+    return false;
+  }
+  if (params.maxTax !== undefined && (payment === null || payment.tax > params.maxTax)) {
+    return false;
+  }
+  if (params.minSeats !== undefined && (payment === null || payment.seats < params.minSeats)) {
+    return false;
+  }
+  if (params.maxStops !== undefined && segments.length - 1 > params.maxStops) {
+    return false;
+  }
+  if (params.maxLayoverMinutes !== undefined) {
+    const gaps = layoverMinutes(route);
+    if (gaps.some((gap) => gap > params.maxLayoverMinutes!)) return false;
+  }
+  if (params.excludeRedeye && isRedeye(route)) {
+    return false;
+  }
+  return true;
+}
+
+function bestRouteValue(route: FlightRoute, sortBy: FlightSearchParams['sortBy']): number {
+  switch (sortBy) {
+    case 'miles':
+      return route.payment?.miles ?? Number.POSITIVE_INFINITY;
+    case 'tax':
+      return route.payment?.tax ?? Number.POSITIVE_INFINITY;
+    case 'duration':
+      return routeDurationMinutes(route);
+    default:
+      return Number.POSITIVE_INFINITY;
+  }
+}
+
+// PointsYeah only applies `airlineProgram` as a browser-side display filter —
+// the encrypted API request carries banks and the promotion flags but not the
+// program list — so we honour it locally instead.
+const PROGRAM_PSEUDO_VALUES = ['Bank transfer promotion only', 'Buy points promotion only'];
+
+function matchesAirlineProgram(result: FlightResult, wanted: string[]): boolean {
+  const codes = wanted.map((value) => value.trim().toUpperCase());
+  const names = wanted.map((value) => value.trim().toLowerCase());
+  return (
+    codes.includes(result.code.toUpperCase()) || names.includes(result.program.toLowerCase())
+  );
+}
+
+export function applyResultFilters(
+  results: FlightResult[],
+  params: FlightSearchParams
+): FlightResult[] {
+  let scoped = results;
+  const programs = (params.airlineProgram ?? []).filter(
+    (value) => !PROGRAM_PSEUDO_VALUES.includes(value)
+  );
+  if (programs.length > 0) {
+    scoped = scoped.filter((result) => matchesAirlineProgram(result, programs));
+  }
+
+  const hasRouteFilters =
+    params.maxMiles !== undefined ||
+    params.maxTax !== undefined ||
+    params.minSeats !== undefined ||
+    params.maxStops !== undefined ||
+    params.maxLayoverMinutes !== undefined ||
+    params.excludeRedeye;
+
+  const filtered: FlightResult[] = [];
+  for (const result of scoped) {
+    let routes = result.routes ?? [];
+    if (hasRouteFilters) {
+      routes = routes.filter((route) => routePassesFilters(route, params));
+    }
+    if (routes.length === 0) continue;
+
+    if (params.sortBy !== 'program') {
+      routes = [...routes].sort(
+        (a, b) => bestRouteValue(a, params.sortBy) - bestRouteValue(b, params.sortBy)
+      );
+    }
+    filtered.push({ ...result, routes });
+  }
+
+  if (params.sortBy !== 'program') {
+    filtered.sort(
+      (a, b) =>
+        Math.min(...(a.routes ?? []).map((r) => bestRouteValue(r, params.sortBy))) -
+        Math.min(...(b.routes ?? []).map((r) => bestRouteValue(r, params.sortBy)))
+    );
+  }
+
+  return params.limit !== undefined ? filtered.slice(0, params.limit) : filtered;
+}
 
 // =============================================================================
 // CLIENT INTERFACE
@@ -158,10 +296,12 @@ export class PointsYeahClient implements IPointsYeahClient {
       logWarning('search', `Search timed out after ${MAX_POLLS} polls`);
     }
 
-    const results = Array.from(allResults.values());
+    const unfiltered = Array.from(allResults.values());
+    const results = applyResultFilters(unfiltered, params);
 
     return {
       total: results.length,
+      unfiltered_total: unfiltered.length,
       results,
     };
   }

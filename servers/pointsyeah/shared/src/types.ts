@@ -45,6 +45,79 @@ export const FlightSearchParamsSchema = z.object({
     .array(z.enum(['Economy', 'Premium Economy', 'Business', 'First']))
     .default(['Economy', 'Business'])
     .describe('Cabin classes to search. Default: ["Economy", "Business"]'),
+
+  // --- Search scope (sent to PointsYeah) ---
+
+  banks: z
+    .array(z.string())
+    .optional()
+    .describe(
+      'Transferable bank currencies to search, e.g. ["Chase", "Amex"]. Defaults to all of them (Amex, Bilt, Capital One, Chase, Citi, WF).'
+    ),
+  airlineProgram: z
+    .array(z.string())
+    .optional()
+    .describe(
+      'Airline loyalty programs to search, e.g. ["UA", "AC", "VS"]. Defaults to all 20 programs.'
+    ),
+  multiday: z
+    .boolean()
+    .default(false)
+    .describe(
+      'Search a range of departure dates instead of a single day. Set departDateTo (and optionally returnDateTo) to bound the range.'
+    ),
+  departDateTo: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional()
+    .describe('Last departure date of a flexible-date window (requires multiday: true)'),
+  returnDateTo: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional()
+    .describe('Last return date of a flexible-date window (requires multiday: true)'),
+  transferBonusOnly: z
+    .boolean()
+    .default(false)
+    .describe('Only return options where a bank transfer bonus is currently active'),
+  buyPointsPromotionOnly: z
+    .boolean()
+    .default(false)
+    .describe('Only return options where buying points is currently on promotion'),
+
+  // --- Result filters (applied locally after the search) ---
+
+  maxMiles: z.number().int().positive().optional().describe('Drop routes costing more than this many miles'),
+  maxTax: z.number().nonnegative().optional().describe('Drop routes with taxes above this amount'),
+  maxStops: z
+    .number()
+    .int()
+    .min(0)
+    .max(4)
+    .optional()
+    .describe('Maximum connections per route (0 = nonstop only)'),
+  minSeats: z.number().int().min(1).optional().describe('Require at least this many award seats'),
+  maxLayoverMinutes: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Drop routes with any connection longer than this many minutes'),
+  excludeRedeye: z
+    .boolean()
+    .default(false)
+    .describe('Drop routes that depart between 21:00 and 05:00'),
+  sortBy: z
+    .enum(['program', 'miles', 'tax', 'duration'])
+    .default('program')
+    .describe('Ordering for the returned results'),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe('Cap how many results are returned'),
 });
 
 export type FlightSearchParams = z.infer<typeof FlightSearchParamsSchema>;
@@ -95,7 +168,10 @@ export interface FlightResult {
 }
 
 export interface FlightSearchResults {
+  /** Results after local filters were applied. */
   total: number;
+  /** How many results PointsYeah returned before filtering. */
+  unfiltered_total: number;
   results: FlightResult[];
 }
 

@@ -46,24 +46,37 @@ export function buildSearchUrl(params: FlightSearchParams): string {
   const cabins = params.cabins.join(',');
   const primaryCabin = params.cabins[0] || 'Economy';
 
+  // PointsYeah encodes "only show options with a live transfer bonus" as a
+  // pseudo program name inside airlineProgram.
+  const airlinePrograms = [
+    ...(params.airlineProgram && params.airlineProgram.length > 0
+      ? params.airlineProgram
+      : DEFAULT_AIRLINE_PROGRAMS.split(',')),
+  ];
+  if (params.transferBonusOnly) airlinePrograms.push('Bank transfer promotion only');
+  if (params.buyPointsPromotionOnly) airlinePrograms.push('Buy points promotion only');
+
+  const banks = params.banks && params.banks.length > 0 ? params.banks.join(',') : DEFAULT_BANKS;
+  const flexible = params.multiday || Boolean(params.departDateTo);
+
   const urlParams = new URLSearchParams({
     cabins,
     cabin: primaryCabin,
-    banks: DEFAULT_BANKS,
-    airlineProgram: DEFAULT_AIRLINE_PROGRAMS,
+    banks,
+    airlineProgram: airlinePrograms.join(','),
     tripType: params.tripType,
     adults: String(params.adults),
     children: String(params.children),
     departure: params.departure,
     arrival: params.arrival,
     departDate: params.departDate,
-    departDateSec: params.departDate,
-    multiday: 'false',
+    departDateSec: params.departDateTo ?? params.departDate,
+    multiday: String(flexible),
   });
 
   if (params.returnDate) {
     urlParams.set('returnDate', params.returnDate);
-    urlParams.set('returnDateSec', params.returnDate);
+    urlParams.set('returnDateSec', params.returnDateTo ?? params.returnDate);
   }
 
   return `https://www.pointsyeah.com/search?${urlParams.toString()}`;

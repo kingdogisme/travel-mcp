@@ -42,7 +42,9 @@ This tool searches PointsYeah for live flight availability using points and mile
 - Discover transfer partner options from bank reward programs
 - Search for premium cabin availability (Business, First)
 
-**Note:** This performs a live search that may take 30-90 seconds to complete as it queries multiple airline programs in real time. Requires Playwright to be installed.`;
+**Note:** This performs a live search that may take 30-90 seconds to complete as it queries multiple airline programs in real time.
+
+**Narrowing a search:** pass banks / airlineProgram to search fewer programs, set multiday with departDateTo for a flexible date range, or set transferBonusOnly to see only options that currently have a bank transfer bonus. Result-side filters (maxMiles, maxTax, maxStops, minSeats, maxLayoverMinutes, excludeRedeye) trim the response locally after the search.`;
 
 function formatDuration(minutes: number): string {
   const hours = Math.floor(minutes / 60);
@@ -128,6 +130,60 @@ export function searchFlightsTool(_server: Server, clientFactory: () => IPointsY
           default: ['Economy', 'Business'],
           description: PARAM_DESCRIPTIONS.cabins,
         },
+        banks: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'Transferable bank currencies to search, e.g. ["Chase","Amex"]. Defaults to all (Amex, Bilt, Capital One, Chase, Citi, WF).',
+        },
+        airlineProgram: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'Airline loyalty programs to search by code, e.g. ["UA","AC","VS"]. Defaults to all 20 programs.',
+        },
+        multiday: {
+          type: 'boolean',
+          description:
+            'Search a range of dates instead of one day. Set departDateTo (and optionally returnDateTo) to bound it.',
+        },
+        departDateTo: {
+          type: 'string',
+          description: 'Last departure date (YYYY-MM-DD) of a flexible-date window',
+        },
+        returnDateTo: {
+          type: 'string',
+          description: 'Last return date (YYYY-MM-DD) of a flexible-date window',
+        },
+        transferBonusOnly: {
+          type: 'boolean',
+          description: 'Only return options with a currently active bank transfer bonus',
+        },
+        buyPointsPromotionOnly: {
+          type: 'boolean',
+          description: 'Only return options where buying points is on promotion',
+        },
+        maxMiles: { type: 'number', description: 'Drop routes costing more than this many miles' },
+        maxTax: { type: 'number', description: 'Drop routes with taxes above this amount' },
+        maxStops: {
+          type: 'number',
+          description: 'Maximum connections per route (0 = nonstop only)',
+        },
+        minSeats: { type: 'number', description: 'Require at least this many award seats' },
+        maxLayoverMinutes: {
+          type: 'number',
+          description: 'Drop routes with a connection longer than this many minutes',
+        },
+        excludeRedeye: {
+          type: 'boolean',
+          description: 'Drop routes departing between 21:00 and 05:00',
+        },
+        sortBy: {
+          type: 'string',
+          enum: ['program', 'miles', 'tax', 'duration'],
+          description: 'Ordering for returned results (default: program order)',
+        },
+        limit: { type: 'number', description: 'Cap how many results are returned' },
       },
       required: ['departure', 'arrival', 'departDate'],
     },
@@ -168,7 +224,17 @@ export function searchFlightsTool(_server: Server, clientFactory: () => IPointsY
           `**Date:** ${params.departDate}${params.returnDate ? ` - ${params.returnDate}` : ''}`,
           `**Passengers:** ${params.adults} adult(s)${params.children ? `, ${params.children} child(ren)` : ''}`,
           `**Cabins:** ${params.cabins.join(', ')}`,
-          `**Results found:** ${searchResults.total} flight option(s)`,
+          params.multiday || params.departDateTo
+            ? `**Flexible dates:** ${params.departDate} -> ${params.departDateTo ?? params.departDate}`
+            : '',
+          params.banks && params.banks.length > 0
+            ? `**Banks:** ${params.banks.join(', ')}`
+            : '',
+          params.transferBonusOnly ? '**Filter:** transfer bonus only' : '',
+          `**Results found:** ${searchResults.total} flight option(s)` +
+            (searchResults.unfiltered_total !== searchResults.total
+              ? ` (from ${searchResults.unfiltered_total} before filters)`
+              : ''),
           '',
         ];
 
