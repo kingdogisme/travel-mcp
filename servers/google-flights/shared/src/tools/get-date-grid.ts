@@ -103,6 +103,30 @@ export const GetDateGridSchema = z.object({
     .positive()
     .optional()
     .describe('Ignore itineraries with any connection longer than this many minutes'),
+  require_carry_on: z
+    .boolean()
+    .optional()
+    .describe('Keep only itineraries that include a free carry-on bag. Note: Google often leaves this flag unset on international fares, so it can filter out valid itineraries there; prefer require_checked_bag for a reliable signal'),
+  require_checked_bag: z
+    .boolean()
+    .optional()
+    .describe('Keep only itineraries that include at least one free checked bag'),
+  layover_airports: z
+    .array(z.string())
+    .optional()
+    .describe('Keep only itineraries whose connections are all at these airports (IATA codes)'),
+  exclude_layover_airports: z
+    .array(z.string())
+    .optional()
+    .describe('Drop itineraries that connect at any of these airports (IATA codes)'),
+  alliances: z
+    .array(z.string())
+    .optional()
+    .describe('Keep only itineraries whose carriers all belong to these alliances, e.g. ["Star Alliance"]'),
+  exclude_alliances: z
+    .array(z.string())
+    .optional()
+    .describe('Drop itineraries that include a carrier from any of these alliances'),
 });
 
 export function getDateGridTool(_server: Server, clientFactory: FlightsClientFactory) {
@@ -116,7 +140,7 @@ Give it a window (start_date / end_date, optional weekdays filter) and it prices
 
 The response also includes price_history, Google's own low-price series for the route over the past ~60 days, and price_insights with Google's read on whether prices are currently low, typical or high. Great for deal-hunting when the user has flexibility on travel dates — call this first to find the cheapest day, then use search_flights on that date.
 
-The same result-side filters as search_flights are available here — airlines / exclude_airlines, departure_after / departure_before, max_duration_minutes and max_layover_minutes — so "cheapest day to fly United, arriving before noon" is one call.
+The same result-side filters as search_flights are available here — airlines / exclude_airlines, alliances / exclude_alliances, departure_after / departure_before, max_duration_minutes, max_layover_minutes, layover_airports / exclude_layover_airports and require_carry_on / require_checked_bag — so "cheapest day to fly United, arriving before noon" is one call.
 
 The grid typically covers ~60 days around the anchor date.`,
     inputSchema: {
@@ -203,6 +227,34 @@ The grid typically covers ~60 days around the anchor date.`,
         max_layover_minutes: {
           type: 'number',
           description: 'Ignore itineraries with any connection longer than this many minutes',
+        },
+        require_carry_on: {
+          type: 'boolean',
+          description: 'Keep only itineraries that include a free carry-on bag. Note: Google often leaves this flag unset on international fares, so it can filter out valid itineraries there; prefer require_checked_bag for a reliable signal',
+        },
+        require_checked_bag: {
+          type: 'boolean',
+          description: 'Keep only itineraries that include at least one free checked bag',
+        },
+        layover_airports: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Keep only itineraries whose connections are all at these airports (IATA codes)',
+        },
+        exclude_layover_airports: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Drop itineraries that connect at any of these airports (IATA codes)',
+        },
+        alliances: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Keep only itineraries whose carriers all belong to these alliances, e.g. ["Star Alliance"]',
+        },
+        exclude_alliances: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Drop itineraries that include a carrier from any of these alliances',
         },
       },
       required: ['origin', 'destination'],

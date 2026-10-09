@@ -1,19 +1,31 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { registerResources } from './resources.js';
 import { createRegisterTools } from './tools.js';
-import { searchFlights, getDateGrid, findAirportCode } from './flights-client/flights-client.js';
+import {
+  searchFlights,
+  getDateGrid,
+  findAirportCode,
+  searchMultiCity,
+  getRoundTripGrid,
+} from './flights-client/flights-client.js';
 import type {
   SearchFlightsOptions,
   SearchFlightsResult,
   GetDateGridOptions,
   DateGridResult,
   AirportResult,
+  SearchMultiCityOptions,
+  MultiCityResult,
+  RoundTripGridOptions,
+  RoundTripGridResult,
 } from './flights-client/types.js';
 
 export interface IFlightsClient {
   searchFlights(options: SearchFlightsOptions): Promise<SearchFlightsResult>;
   getDateGrid(options: GetDateGridOptions): Promise<DateGridResult>;
   findAirportCode(query: string): Promise<AirportResult[]>;
+  searchMultiCity(options: SearchMultiCityOptions): Promise<MultiCityResult>;
+  getRoundTripGrid(options: RoundTripGridOptions): Promise<RoundTripGridResult>;
 }
 
 export type FlightsClientFactory = () => IFlightsClient;
@@ -29,6 +41,14 @@ export class GoogleFlightsClient implements IFlightsClient {
 
   async findAirportCode(query: string): Promise<AirportResult[]> {
     return findAirportCode(query);
+  }
+
+  async searchMultiCity(options: SearchMultiCityOptions): Promise<MultiCityResult> {
+    return searchMultiCity(options);
+  }
+
+  async getRoundTripGrid(options: RoundTripGridOptions): Promise<RoundTripGridResult> {
+    return getRoundTripGrid(options);
   }
 }
 

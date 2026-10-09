@@ -359,3 +359,91 @@ export interface FlightSearchResponse {
     status: string; // "processing" | "done"
   } | null;
 }
+
+// =============================================================================
+// PRICE ALERTS (api.pointsyeah.com/v2/live)
+//
+// PointsYeah lets a logged-in user keep a handful of price alerts. An alert is
+// a one-way route (or a date range) plus a set of award filters; PointsYeah
+// emails the user when a matching award appears. The web app creates these via
+// /v2/live/flight/alert/create with a filter_criteria + info payload.
+// =============================================================================
+
+export const ManagePriceAlertsParamsSchema = z.object({
+  action: z
+    .enum(['list', 'create', 'delete'])
+    .default('list')
+    .describe('"list" the saved alerts, "create" a new one, or "delete" one by alert_id'),
+  alert_id: z
+    .string()
+    .optional()
+    .describe('Alert id to remove (required when action="delete"; ids come from action="list")'),
+
+  // --- create-only fields ---
+  origin: z.string().min(3).optional().describe('Origin airport code (required to create)'),
+  destination: z
+    .string()
+    .min(3)
+    .optional()
+    .describe('Destination airport code (required to create)'),
+  departDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional()
+    .describe('Departure date YYYY-MM-DD (required to create)'),
+  departDateTo: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional()
+    .describe('Optional last date of a flexible window (defaults to departDate)'),
+  cabins: z
+    .array(z.enum(['Economy', 'Premium Economy', 'Business', 'First']))
+    .optional()
+    .describe('Cabins to watch (default: all four)'),
+  banks: z.array(z.string()).optional().describe('Transferable banks to watch (default: all)'),
+  airlines: z.array(z.string()).optional().describe('Restrict to these airline program codes'),
+  maxMiles: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Max award miles per passenger (required to create)'),
+  maxTax: z.number().min(0).optional().describe('Max cash taxes in USD'),
+  maxStops: z.number().int().min(0).max(4).optional().describe('Maximum connections per route'),
+  maxDurationHours: z.number().positive().optional().describe('Max total flight duration, hours'),
+  flightNumbers: z
+    .array(z.string())
+    .optional()
+    .describe('Only alert on these flight numbers, e.g. ["NH7", "JL1"]'),
+  excludeAirlines: z.array(z.string()).optional().describe('Airline codes to exclude'),
+  adults: z.number().int().min(1).max(9).default(1).describe('Number of adult passengers'),
+  children: z.number().int().min(0).max(9).default(0).describe('Number of child passengers'),
+});
+
+export type ManagePriceAlertsParams = z.infer<typeof ManagePriceAlertsParamsSchema>;
+
+export interface PriceAlert {
+  alert_id: string;
+  created_at: string | null;
+  email: string | null;
+  valid: boolean;
+  expired: boolean;
+  has_new_routes: boolean;
+  latest_entry_date: string | null;
+  /** Human-readable route/date summaries, e.g. "SFO-NRT@2026-11-15@1:0". */
+  entries: string[];
+  info: {
+    departure?: string;
+    arrival?: string;
+    departureDate?: string;
+    departureDateSec?: string;
+    passengers_v2?: { adults: number; children: number };
+  } | null;
+  filter_criteria: Record<string, unknown> | null;
+}
+
+export interface PriceAlertList {
+  items: PriceAlert[];
+  alert_limit: number | null;
+  alert_used: number | null;
+}

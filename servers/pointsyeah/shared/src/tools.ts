@@ -6,10 +6,8 @@ import { findTransferBonusesTool } from './tools/find-transfer-bonuses.js';
 import { findCheapestAwardDatesTool } from './tools/find-cheapest-award-dates.js';
 import { exploreAwardRoutesTool } from './tools/explore-award-routes.js';
 import { recommendAwardDestinationsTool } from './tools/recommend-award-destinations.js';
-import { searchHotelsTool } from './tools/search-hotels.js';
-import { recommendHotelsTool } from './tools/recommend-hotels.js';
-import { hotelCalendarTool, hotelDetailTool } from './tools/get-hotel-calendar.js';
 import { getSearchHistoryTool } from './tools/get-search-history.js';
+import { managePriceAlertsTool } from './tools/manage-price-alerts.js';
 import { setRefreshTokenTool } from './tools/set-refresh-token.js';
 import { getServerState, setAuthenticated, clearRefreshToken } from './state.js';
 import { logWarning } from './logging.js';
@@ -65,15 +63,13 @@ const ALL_TOOLS: ToolDefinition[] = [
   // Live award probes that also hit external APIs
   { factory: findTransferBonusesTool, groups: ['write', 'admin'] },
   { factory: findCheapestAwardDatesTool, groups: ['write', 'admin'] },
-  // Award explorer and hotel search (api2 JSON endpoints, same login)
+  // Award explorer (api2 JSON endpoints, same login)
   { factory: exploreAwardRoutesTool, groups: ['write', 'admin'] },
   { factory: recommendAwardDestinationsTool, groups: ['write', 'admin'] },
-  { factory: searchHotelsTool, groups: ['write', 'admin'] },
-  { factory: recommendHotelsTool, groups: ['write', 'admin'] },
-  { factory: hotelCalendarTool, groups: ['write', 'admin'] },
-  { factory: hotelDetailTool, groups: ['write', 'admin'] },
   // Read-only tools - only query existing data
   { factory: getSearchHistoryTool, groups: ['readonly', 'write', 'admin'] },
+  // Price alerts mutate the account, so they belong to write/admin
+  { factory: managePriceAlertsTool, groups: ['write', 'admin'] },
 ];
 
 const AUTH_REQUIRED_ERROR =

@@ -114,6 +114,30 @@ export const SearchFlightsSchema = z.object({
     .positive()
     .optional()
     .describe('Drop itineraries with any single connection longer than this many minutes.'),
+  require_carry_on: z
+    .boolean()
+    .optional()
+    .describe('Keep only itineraries that include a free carry-on bag. Note: Google often leaves this flag unset on international fares, so it can filter out valid itineraries there; prefer require_checked_bag for a reliable signal.'),
+  require_checked_bag: z
+    .boolean()
+    .optional()
+    .describe('Keep only itineraries that include at least one free checked bag.'),
+  layover_airports: z
+    .array(z.string())
+    .optional()
+    .describe('Keep only itineraries whose connections are all at these airports (IATA codes).'),
+  exclude_layover_airports: z
+    .array(z.string())
+    .optional()
+    .describe('Drop itineraries that connect at any of these airports (IATA codes).'),
+  alliances: z
+    .array(z.string())
+    .optional()
+    .describe('Keep only itineraries whose carriers all belong to these alliances, e.g. ["Star Alliance", "oneworld"].'),
+  exclude_alliances: z
+    .array(z.string())
+    .optional()
+    .describe('Drop itineraries that include a carrier from any of these alliances.'),
   exclude_basic_economy: z
     .boolean()
     .default(true)
@@ -145,7 +169,7 @@ Pagination: The response includes has_more (boolean) and next_offset (number or 
 
 Cabin handling: Google ignores the cabin enum inside its protobuf query, so business and first searches are issued through Google's natural-language endpoint instead — those honour the cabin but return a smaller set of fares. Premium economy is not understood by that endpoint; when that happens the response carries cabin_honored: false plus a note in notes, and the fares may be from a lower cabin.
 
-Result-side filters Google's query cannot express are applied locally: airlines / exclude_airlines, departure_after / departure_before, arrival_after / arrival_before (all "HH:MM" local time), max_duration_minutes and max_layover_minutes. total_results reflects the filtered count.
+Result-side filters Google's query cannot express are applied locally: airlines / exclude_airlines, alliances / exclude_alliances (Star Alliance, oneworld, SkyTeam), departure_after / departure_before, arrival_after / arrival_before (all "HH:MM" local time), max_duration_minutes, max_layover_minutes, layover_airports / exclude_layover_airports, and require_carry_on / require_checked_bag. total_results reflects the filtered count.
 
 Multiple airports per leg are supported (e.g. "SFO,OAK,SJC" as origin, "NRT,HND" as destination) — useful for metro areas with several airports.
 
@@ -258,6 +282,34 @@ Use get_date_grid to find the cheapest dates before searching.`,
         max_layover_minutes: {
           type: 'number',
           description: 'Drop itineraries with any connection longer than this many minutes',
+        },
+        require_carry_on: {
+          type: 'boolean',
+          description: 'Keep only itineraries that include a free carry-on bag. Note: Google often leaves this flag unset on international fares, so it can filter out valid itineraries there; prefer require_checked_bag for a reliable signal',
+        },
+        require_checked_bag: {
+          type: 'boolean',
+          description: 'Keep only itineraries that include at least one free checked bag',
+        },
+        layover_airports: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Keep only itineraries whose connections are all at these airports (IATA codes)',
+        },
+        exclude_layover_airports: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Drop itineraries that connect at any of these airports (IATA codes)',
+        },
+        alliances: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Keep only itineraries whose carriers all belong to these alliances, e.g. ["Star Alliance"]',
+        },
+        exclude_alliances: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Drop itineraries that include a carrier from any of these alliances',
         },
       },
       required: ['origin', 'destination', 'departure_date'],

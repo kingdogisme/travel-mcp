@@ -9,7 +9,6 @@ export {
   type ClientFactory,
   type IPointsYeahClient,
   type AwardExplorerResult,
-  type HotelSearchResult,
 } from './server.js';
 
 // Flight search types
@@ -44,15 +43,12 @@ export {
   resetState,
 } from './state.js';
 
-// Award explorer / hotel search request schemas (api2 endpoints)
+// Award explorer request schemas (api2 endpoints)
 export {
   PlaceFilterSchema,
   ExploreAwardRoutesParamsSchema,
   RecommendAwardDestinationsParamsSchema,
-  SearchHotelsParamsSchema,
   RecommendAwardDestinationsParamsSchema as _unused,
-  HotelCalendarParamsSchema,
-  HotelDetailParamsSchema,
 } from './pointsyeah-api/schemas.js';
 
 // Logging exports

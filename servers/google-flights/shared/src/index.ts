@@ -15,6 +15,8 @@ export {
   getDateGrid,
   findAirportCode,
   buildTfsParam,
+  searchMultiCity,
+  getRoundTripGrid,
 } from './flights-client/flights-client.js';
 export type {
   FlightOffer,
@@ -28,6 +30,13 @@ export type {
   GetDateGridOptions,
   SeatClass,
   TripType,
+  MultiCityLeg,
+  MultiCityLegResult,
+  MultiCityResult,
+  SearchMultiCityOptions,
+  RoundTripGridOptions,
+  RoundTripGridResult,
+  RoundTripGridEntry,
 } from './flights-client/types.js';
 
 // Logging exports

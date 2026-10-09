@@ -1,4 +1,4 @@
-import type { IPointsYeahClient, AwardExplorerResult, HotelSearchResult } from '../server.js';
+import type { IPointsYeahClient, AwardExplorerResult } from '../server.js';
 import type {
   FlightSearchParams,
   FlightResult,
@@ -70,8 +70,8 @@ export function createIntegrationMockPointsYeahClient(
       return mockData.searchHistory || [];
     },
 
-    // Explorer + hotel endpoints (api2). The integration mock returns the
-    // canned shapes the real API uses so tool formatting can be exercised.
+    // Explorer endpoints (api2). The integration mock returns the canned
+    // shapes the real API uses so tool formatting can be exercised.
     async exploreAwardRoutes(): Promise<AwardExplorerResult> {
       return { total: 0, results: [] };
     },
@@ -92,24 +92,16 @@ export function createIntegrationMockPointsYeahClient(
       return { min_points: 0, max_points: 0, min_tax: 0, max_tax: 0 };
     },
 
-    async searchHotels(): Promise<HotelSearchResult> {
-      return { total: 0, results: [] };
+    async listPriceAlerts(): Promise<{ items: never[]; alert_limit: number; alert_used: number }> {
+      return { items: [], alert_limit: 4, alert_used: 0 };
     },
 
-    async recommendHotels(): Promise<HotelSearchResult> {
-      return { total: 0, results: [] };
+    async createPriceAlert(): Promise<never> {
+      throw new Error('createPriceAlert is not implemented in the integration mock');
     },
 
-    async hotelMap(): Promise<unknown> {
-      return [];
-    },
-
-    async hotelCalendar(): Promise<Record<string, unknown>> {
-      return {};
-    },
-
-    async hotelDetail(): Promise<Record<string, unknown>> {
-      return {};
+    async deletePriceAlert(): Promise<void> {
+      return;
     },
 
     async findTransferBonuses(

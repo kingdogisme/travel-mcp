@@ -14,6 +14,9 @@ import type {
   FindCheapestAwardDatesParams,
   AwardDateOption,
   CheapestAwardDatesResult,
+  ManagePriceAlertsParams,
+  PriceAlert,
+  PriceAlertList,
 } from './types.js';
 import { FlightSearchParamsSchema } from './types.js';
 import { refreshCognitoTokens } from './pointsyeah-client/lib/auth.js';
@@ -22,15 +25,21 @@ import type { PlaywrightSearchDeps } from './pointsyeah-client/lib/search.js';
 import { fetchSearchResults } from './pointsyeah-client/lib/fetch-results.js';
 import { getSearchHistory } from './pointsyeah-client/lib/user-api.js';
 import { logDebug, logWarning } from './logging.js';
-import { API2_BASE, FETCH_TIMEOUT_MS } from './constants.js';
+import {
+  API2_BASE,
+  LIVE_BASE,
+  DEFAULT_BANKS,
+  DEFAULT_ALERT_CABINS,
+  FETCH_TIMEOUT_MS,
+} from './constants.js';
 
 // =============================================================================
-// EXPLORER / HOTEL API (api2.pointsyeah.com)
+// AWARD EXPLORER API (api2.pointsyeah.com)
 //
-// The website's Explorer (award map) and hotel search are served by api2 with
-// the same Cognito token the live search uses, so no extra credentials are
-// needed. Responses are plain JSON — a second or two per call, versus 30-90s
-// for the browser-driven live search.
+// The website's Explorer (award map) is served by api2 with the same Cognito
+// token the live search uses, so no extra credentials are needed. Responses
+// are plain JSON — a second or two per call, versus 30-90s for the
+// browser-driven live search.
 // =============================================================================
 
 /** Gap between explorer calls; these hit the same API as the rest of the app. */
@@ -86,6 +95,105 @@ async function api2Post<T>(path: string, body: unknown, idToken: string): Promis
     throw new Error(`PointsYeah API ${path} error: ${payload.error ?? payload.message ?? 'unknown'}`);
   }
   return (payload.data !== undefined ? payload.data : payload) as T;
+}
+
+// =============================================================================
+// LIVE ACCOUNT API (api.pointsyeah.com/v2/live)
+//
+// Price alerts, preferences and the transfer-bonus catalog are served here.
+// Same Cognito ID token as the search API, plain JSON, no browser involved.
+// =============================================================================
+
+/** Gap between live-account calls, so we stay polite to the API. */
+const LIVE_MIN_INTERVAL_MS = 250;
+
+let lastLiveCall = 0;
+let liveChain: Promise<void> = Promise.resolve();
+
+async function liveSlot(): Promise<void> {
+  const previous = liveChain;
+  let release: () => void = () => {};
+  liveChain = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await previous;
+  const elapsed = Date.now() - lastLiveCall;
+  const wait = LIVE_MIN_INTERVAL_MS + Math.floor(Math.random() * 150) - elapsed;
+  if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+  lastLiveCall = Date.now();
+  release();
+}
+
+async function liveCall<T>(
+  method: 'GET' | 'POST',
+  path: string,
+  idToken: string,
+  body?: unknown
+): Promise<T> {
+  await liveSlot();
+  logDebug('live', `${method} ${path}`);
+
+  const response = await fetch(`${LIVE_BASE}${path}`, {
+    method,
+    headers: {
+      // Same convention as the search API: raw Cognito ID token, no Bearer prefix.
+      Authorization: idToken,
+      'Content-Type': 'application/json',
+      Origin: 'https://www.pointsyeah.com',
+      Referer: 'https://www.pointsyeah.com/',
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
+
+  if (!response.ok) {
+    throw new Error(`PointsYeah API ${path} failed: ${response.status} ${response.statusText}`);
+  }
+
+  const payload = (await response.json()) as {
+    code?: number;
+    success?: boolean;
+    error?: string;
+    message?: string;
+    data?: unknown;
+  };
+
+  if (payload.success === false) {
+    throw new Error(`PointsYeah API ${path} error: ${payload.error ?? payload.message ?? 'unknown'}`);
+  }
+  return (payload.data !== undefined ? payload.data : payload) as T;
+}
+
+/** Shape the web app posts to /flight/alert/create. */
+function buildPriceAlertPayload(params: ManagePriceAlertsParams): Record<string, unknown> {
+  const filterCriteria: Record<string, unknown> = {
+    max_miles: params.maxMiles,
+    exclude_cabins: [],
+    include_cabins: [],
+    cabins: params.cabins ?? DEFAULT_ALERT_CABINS,
+    banks: params.banks ?? DEFAULT_BANKS,
+  };
+  if (params.maxStops !== undefined) filterCriteria.stops = params.maxStops;
+  if (params.airlines && params.airlines.length > 0) filterCriteria.airlines = params.airlines;
+  if (params.maxTax !== undefined) filterCriteria.tax = params.maxTax;
+  if (params.maxDurationHours !== undefined) filterCriteria.max_duration = params.maxDurationHours;
+  if (params.flightNumbers && params.flightNumbers.length > 0) {
+    filterCriteria.flight_number = params.flightNumbers;
+  }
+  if (params.excludeAirlines && params.excludeAirlines.length > 0) {
+    filterCriteria.carrier_exclusion = params.excludeAirlines;
+  }
+
+  return {
+    filter_criteria: filterCriteria,
+    info: {
+      departure: params.origin,
+      arrival: params.destination,
+      departureDate: params.departDate,
+      departureDateSec: params.departDateTo ?? params.departDate,
+      passengers_v2: { adults: params.adults, children: params.children },
+    },
+  };
 }
 
 // =============================================================================
@@ -261,28 +369,21 @@ export interface AwardExplorerResult {
   [key: string]: unknown;
 }
 
-export interface HotelSearchResult {
-  total: number;
-  results: unknown[];
-  [key: string]: unknown;
-}
-
 export interface IPointsYeahClient {
   searchFlights(params: FlightSearchParams): Promise<FlightSearchResults>;
   getSearchHistory(): Promise<unknown>;
   findTransferBonuses(params: FindTransferBonusesParams): Promise<TransferBonusSearchResult>;
   findCheapestAwardDates(params: FindCheapestAwardDatesParams): Promise<CheapestAwardDatesResult>;
-  // Explorer + hotel API (api2, same Cognito token)
+  // Award explorer API (api2, same Cognito token)
   exploreAwardRoutes(body: Record<string, unknown>): Promise<AwardExplorerResult>;
   exploreAwardAggregate(body: Record<string, unknown>): Promise<AwardExplorerResult>;
   exploreAwardCount(): Promise<{ count: number }>;
   exploreAwardRecommend(body: Record<string, unknown>): Promise<Record<string, unknown>>;
   exploreFilterRange(body: Record<string, unknown>): Promise<Record<string, unknown>>;
-  searchHotels(body: Record<string, unknown>): Promise<HotelSearchResult>;
-  recommendHotels(body: Record<string, unknown>): Promise<HotelSearchResult>;
-  hotelMap(body: Record<string, unknown>): Promise<unknown>;
-  hotelCalendar(body: Record<string, unknown>): Promise<Record<string, unknown>>;
-  hotelDetail(body: Record<string, unknown>): Promise<Record<string, unknown>>;
+  // Live account API (price alerts)
+  listPriceAlerts(): Promise<PriceAlertList>;
+  createPriceAlert(params: ManagePriceAlertsParams): Promise<PriceAlert>;
+  deletePriceAlert(alertId: string): Promise<void>;
 }
 
 function bonusEndDateLabel(unixSeconds: number | null | undefined): string | null {
@@ -472,7 +573,7 @@ export class PointsYeahClient implements IPointsYeahClient {
     return this.withAuth((idToken) => getSearchHistory(idToken));
   }
 
-  // --- Explorer (award map) and hotel search, both on api2 ---
+  // --- Explorer (award map), on api2 ---
 
   async exploreAwardRoutes(body: Record<string, unknown>): Promise<AwardExplorerResult> {
     return this.withAuth((idToken) => api2Post<AwardExplorerResult>('/explorer/search', body, idToken));
@@ -500,30 +601,32 @@ export class PointsYeahClient implements IPointsYeahClient {
     );
   }
 
-  async searchHotels(body: Record<string, unknown>): Promise<HotelSearchResult> {
-    return this.withAuth((idToken) =>
-      api2Post<HotelSearchResult>('/hotel/explorer/search', body, idToken)
+  // --- Live account API (price alerts) ---
+
+  async listPriceAlerts(): Promise<PriceAlertList> {
+    return this.withAuth(async (idToken) => {
+      const data = await liveCall<{
+        items?: PriceAlert[];
+        alert_limit?: number;
+        alert_used?: number;
+      }>('GET', '/flight/alerts', idToken);
+      return {
+        items: data.items ?? [],
+        alert_limit: data.alert_limit ?? null,
+        alert_used: data.alert_used ?? null,
+      };
+    });
+  }
+
+  async createPriceAlert(params: ManagePriceAlertsParams): Promise<PriceAlert> {
+    const body = buildPriceAlertPayload(params);
+    return this.withAuth((idToken) => liveCall<PriceAlert>('POST', '/flight/alert/create', idToken, body));
+  }
+
+  async deletePriceAlert(alertId: string): Promise<void> {
+    await this.withAuth((idToken) =>
+      liveCall<unknown>('POST', '/flight/alert/delete', idToken, { alert_id: alertId })
     );
-  }
-
-  async recommendHotels(body: Record<string, unknown>): Promise<HotelSearchResult> {
-    return this.withAuth((idToken) =>
-      api2Post<HotelSearchResult>('/hotel/explorer/recommend', body, idToken)
-    );
-  }
-
-  async hotelMap(body: Record<string, unknown>): Promise<unknown> {
-    return this.withAuth((idToken) => api2Post<unknown>('/hotel/explorer/map', body, idToken));
-  }
-
-  async hotelCalendar(body: Record<string, unknown>): Promise<Record<string, unknown>> {
-    return this.withAuth((idToken) =>
-      api2Post<Record<string, unknown>>('/hotel/explorer/calendar/v2', body, idToken)
-    );
-  }
-
-  async hotelDetail(body: Record<string, unknown>): Promise<Record<string, unknown>> {
-    return this.withAuth((idToken) => api2Post<Record<string, unknown>>('/hotel/detail', body, idToken));
   }
 
   /**

@@ -15,6 +15,12 @@ import type {
   AirportResult,
   SeatClass,
   TripType,
+  SearchMultiCityOptions,
+  MultiCityResult,
+  MultiCityLegResult,
+  RoundTripGridOptions,
+  RoundTripGridResult,
+  RoundTripGridEntry,
 } from './types.js';
 import { logDebug, logWarning } from '../logging.js';
 
@@ -63,6 +69,8 @@ const DEFAULT_HEADERS: Record<string, string> = {
 const MIN_REQUEST_INTERVAL_MS = 1500;
 /** Hard ceiling on live lookups per date-grid call — keeps us polite to Google. */
 const MAX_GRID_DATES = 14;
+/** Hard ceiling on live lookups per round-trip grid call. */
+const MAX_ROUND_TRIP_PAIRS = 18;
 const MAX_JITTER_MS = 900;
 const MAX_ATTEMPTS = 4;
 const BASE_BACKOFF_MS = 3000;
@@ -666,7 +674,55 @@ export type OfferPreferences = Pick<
   | 'arrival_before'
   | 'max_duration_minutes'
   | 'max_layover_minutes'
+  | 'require_carry_on'
+  | 'require_checked_bag'
+  | 'layover_airports'
+  | 'exclude_layover_airports'
+  | 'alliances'
+  | 'exclude_alliances'
 >;
+
+/**
+ * Best-effort mapping from airline IATA code to its global alliance. Alliance
+ * membership changes slowly but does change, so this is a static table covering
+ * the major carriers; unknown codes are treated as non-aligned.
+ */
+const ALLIANCE_BY_AIRLINE: Record<string, string> = {
+  // Star Alliance
+  UA: 'Star Alliance', AC: 'Star Alliance', LH: 'Star Alliance', LX: 'Star Alliance',
+  OS: 'Star Alliance', SN: 'Star Alliance', SK: 'Star Alliance', A3: 'Star Alliance',
+  LO: 'Star Alliance', TP: 'Star Alliance', OU: 'Star Alliance', NH: 'Star Alliance',
+  OZ: 'Star Alliance', CA: 'Star Alliance', ZH: 'Star Alliance', SQ: 'Star Alliance',
+  TG: 'Star Alliance', TK: 'Star Alliance', AI: 'Star Alliance', ET: 'Star Alliance',
+  MS: 'Star Alliance', CM: 'Star Alliance', AV: 'Star Alliance', NZ: 'Star Alliance',
+  // oneworld
+  AA: 'oneworld', BA: 'oneworld', QF: 'oneworld', CX: 'oneworld', JL: 'oneworld',
+  QR: 'oneworld', AY: 'oneworld', IB: 'oneworld', EI: 'oneworld', LA: 'oneworld',
+  MH: 'oneworld', RJ: 'oneworld', UL: 'oneworld', WY: 'oneworld', AS: 'oneworld',
+  AT: 'oneworld', GF: 'oneworld',
+  // SkyTeam
+  DL: 'SkyTeam', AF: 'SkyTeam', KL: 'SkyTeam', AZ: 'SkyTeam', KE: 'SkyTeam',
+  MU: 'SkyTeam', CZ: 'SkyTeam', AM: 'SkyTeam', AR: 'SkyTeam', CI: 'SkyTeam',
+  GA: 'SkyTeam', ME: 'SkyTeam', RO: 'SkyTeam', SV: 'SkyTeam', VN: 'SkyTeam',
+  VS: 'SkyTeam', KQ: 'SkyTeam',
+};
+
+function normalizeAlliance(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function offerCarrierCodes(offer: FlightOffer): string[] {
+  const codes = new Set<string>();
+  if (offer.airline_code) codes.add(offer.airline_code.toUpperCase());
+  for (const segment of offer.segments) {
+    if (segment.airline_code) codes.add(segment.airline_code.toUpperCase());
+  }
+  return [...codes];
+}
+
+function normalizeAirportCodes(codes: string[]): string[] {
+  return codes.map((code) => code.trim().toUpperCase()).filter((code) => code.length > 0);
+}
 
 export function filterOffersByPreferences(
   offers: FlightOffer[],
@@ -697,6 +753,44 @@ export function filterOffersByPreferences(
   if (options.max_layover_minutes !== undefined) {
     const limit = options.max_layover_minutes;
     filtered = filtered.filter((offer) => offer.layovers.every((l) => l.minutes <= limit));
+  }
+  if (options.require_carry_on) {
+    filtered = filtered.filter((offer) => offer.extensions.carry_on_included);
+  }
+  if (options.require_checked_bag) {
+    filtered = filtered.filter((offer) => offer.extensions.checked_bags_included >= 1);
+  }
+  if (options.layover_airports && options.layover_airports.length > 0) {
+    const allowed = new Set(normalizeAirportCodes(options.layover_airports));
+    filtered = filtered.filter((offer) =>
+      offer.layovers.every((l) => allowed.has(l.airport.toUpperCase()))
+    );
+  }
+  if (options.exclude_layover_airports && options.exclude_layover_airports.length > 0) {
+    const banned = new Set(normalizeAirportCodes(options.exclude_layover_airports));
+    filtered = filtered.filter((offer) =>
+      offer.layovers.every((l) => !banned.has(l.airport.toUpperCase()))
+    );
+  }
+  if (options.alliances && options.alliances.length > 0) {
+    const wanted = new Set(options.alliances.map(normalizeAlliance));
+    filtered = filtered.filter((offer) => {
+      const codes = offerCarrierCodes(offer);
+      if (codes.length === 0) return false;
+      return codes.every((code) => {
+        const alliance = ALLIANCE_BY_AIRLINE[code];
+        return alliance !== undefined && wanted.has(normalizeAlliance(alliance));
+      });
+    });
+  }
+  if (options.exclude_alliances && options.exclude_alliances.length > 0) {
+    const banned = new Set(options.exclude_alliances.map(normalizeAlliance));
+    filtered = filtered.filter((offer) =>
+      offerCarrierCodes(offer).every((code) => {
+        const alliance = ALLIANCE_BY_AIRLINE[code];
+        return alliance === undefined || !banned.has(normalizeAlliance(alliance));
+      })
+    );
   }
 
   return filtered;
@@ -1003,6 +1097,93 @@ export async function searchFlights(options: SearchFlightsOptions): Promise<Sear
 }
 
 /**
+ * Search a multi-city trip. Google prices these leg by leg rather than as one
+ * combined itinerary, so we run each leg as its own one-way search (reusing the
+ * same polite fetch path and filters) and report the options per leg, plus the
+ * sum of each leg's cheapest fare.
+ */
+export async function searchMultiCity(options: SearchMultiCityOptions): Promise<MultiCityResult> {
+  if (!Array.isArray(options.legs) || options.legs.length < 2) {
+    throw new Error('A multi-city trip needs at least two legs');
+  }
+  if (options.legs.length > 6) {
+    throw new Error('A multi-city trip supports at most six legs');
+  }
+
+  const legs: MultiCityLegResult[] = [];
+  for (const leg of options.legs) {
+    const result = await searchFlights({
+      origin: leg.origin,
+      destination: leg.destination,
+      departure_date: leg.date,
+      trip_type: 'one_way',
+      seat_class: options.seat_class,
+      adults: options.adults,
+      children: options.children,
+      infants_in_seat: options.infants_in_seat,
+      infants_on_lap: options.infants_on_lap,
+      max_stops: options.max_stops,
+      sort_by: options.sort_by,
+      max_results: options.max_results,
+      offset: 0,
+      currency: options.currency,
+      exclude_basic_economy: options.exclude_basic_economy,
+      max_emissions_percent: options.max_emissions_percent,
+      airlines: options.airlines,
+      exclude_airlines: options.exclude_airlines,
+      departure_after: options.departure_after,
+      departure_before: options.departure_before,
+      arrival_after: options.arrival_after,
+      arrival_before: options.arrival_before,
+      max_duration_minutes: options.max_duration_minutes,
+      max_layover_minutes: options.max_layover_minutes,
+      require_carry_on: options.require_carry_on,
+      require_checked_bag: options.require_checked_bag,
+      layover_airports: options.layover_airports,
+      exclude_layover_airports: options.exclude_layover_airports,
+      alliances: options.alliances,
+      exclude_alliances: options.exclude_alliances,
+    });
+
+    legs.push({
+      leg,
+      total_results: result.total_results,
+      search_url: result.search_url,
+      cabin_honored: result.query.cabin_honored,
+      options: result.flights,
+      notes: result.notes,
+    });
+  }
+
+  // Sum the cheapest fare on each leg, when every leg priced at least one fare.
+  let cheapestTotal: MultiCityResult['cheapest_total'] = null;
+  const cheapestPerLeg = legs.map((entry) => entry.options[0]?.price);
+  if (cheapestPerLeg.every((price) => typeof price === 'number')) {
+    cheapestTotal = {
+      currency: options.currency,
+      total: cheapestPerLeg.reduce((sum, price) => sum + (price as number), 0),
+      per_leg: cheapestPerLeg as number[],
+      airlines: legs.map((entry) => entry.options[0]?.airline ?? ''),
+    };
+  }
+
+  const notes: string[] = [
+    'Google prices multi-city trips leg by leg, so each leg is searched as its own one-way trip. Pick one option per leg; the cheapest_total adds each leg\'s cheapest fare.',
+  ];
+  const emptyLegs = legs.filter((entry) => entry.options.length === 0);
+  if (emptyLegs.length > 0) {
+    emptyLegs.forEach((entry) =>
+      notes.push(`No fares found for ${entry.leg.origin} to ${entry.leg.destination} on ${entry.leg.date}.`)
+    );
+  }
+  if (!cheapestTotal && emptyLegs.length === 0) {
+    notes.push('Could not total the trip because at least one leg returned no priced fare.');
+  }
+
+  return { legs, cheapest_total: cheapestTotal, notes };
+}
+
+/**
  * Enumerate the dates a caller asked for, honouring the weekday filter and the
  * cap on how many live lookups we are willing to make in one call.
  */
@@ -1179,3 +1360,159 @@ export async function findAirportCode(query: string): Promise<AirportResult[]> {
 
 // For testing: export the internal parser
 export { extractDs1, parseFlightOffers, formatTime, formatDate, filterByStops };
+
+function addDays(date: string, days: number): string {
+  const cursor = new Date(`${date}T00:00:00Z`);
+  cursor.setUTCDate(cursor.getUTCDate() + days);
+  return cursor.toISOString().split('T')[0];
+}
+
+/** Evenly sample up to `count` dates from an ordered list (keeps the ends). */
+function sampleDates(dates: string[], count: number): string[] {
+  if (count >= dates.length) return [...dates];
+  if (count <= 1) return [dates[0]];
+  const picked: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const index = Math.round((i * (dates.length - 1)) / (count - 1));
+    picked.push(dates[index]);
+  }
+  return [...new Set(picked)];
+}
+
+/**
+ * Price a grid of round trips: departure dates across a window crossed with a
+ * range of trip lengths. Every cell is its own round-trip search, so the number
+ * of live lookups is capped (MAX_ROUND_TRIP_PAIRS) to stay polite to Google.
+ */
+export async function getRoundTripGrid(options: RoundTripGridOptions): Promise<RoundTripGridResult> {
+  if (options.max_nights < options.min_nights) {
+    throw new Error('max_nights must be greater than or equal to min_nights');
+  }
+
+  const start = new Date(`${options.start_date}T00:00:00Z`);
+  const end = new Date(`${options.end_date}T00:00:00Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    throw new Error('Invalid date range — expected YYYY-MM-DD');
+  }
+  if (end < start) {
+    throw new Error('end_date must not be before start_date');
+  }
+
+  const allDepartureDates: string[] = [];
+  for (const cursor = new Date(start); cursor <= end; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
+    allDepartureDates.push(cursor.toISOString().split('T')[0]);
+  }
+  if (allDepartureDates.length === 0) {
+    throw new Error('No departure dates in the requested range');
+  }
+
+  const nightsList: number[] = [];
+  for (let nights = options.min_nights; nights <= options.max_nights; nights++) {
+    nightsList.push(nights);
+  }
+
+  const departureDates = sampleDates(allDepartureDates, options.max_departure_dates);
+  const maxPairs = Math.min(options.max_pairs, MAX_ROUND_TRIP_PAIRS);
+
+  const cells: Array<{ departure_date: string; return_date: string; nights: number }> = [];
+  outer: for (const departure of departureDates) {
+    for (const nights of nightsList) {
+      if (cells.length >= maxPairs) break outer;
+      cells.push({ departure_date: departure, return_date: addDays(departure, nights), nights });
+    }
+  }
+
+  const totalPossible = departureDates.length * nightsList.length;
+  const truncated = totalPossible > cells.length;
+
+  const grid: RoundTripGridEntry[] = [];
+  let anchorUrl = '';
+  let cabinHonored = options.seat_class === 'economy';
+
+  for (const cell of cells) {
+    const page = await fetchSearchPage({
+      origin: options.origin,
+      destination: options.destination,
+      departure_date: cell.departure_date,
+      return_date: cell.return_date,
+      trip_type: 'round_trip',
+      seat_class: options.seat_class,
+      adults: options.adults,
+      children: 0,
+      infants_in_seat: 0,
+      infants_on_lap: 0,
+      currency: options.currency,
+    });
+
+    if (!anchorUrl) {
+      anchorUrl = page.url;
+      cabinHonored = page.cabin_honored;
+    }
+
+    let offers = parseFlightOffers(page.ds1, options.currency);
+    if (options.exclude_basic_economy) {
+      offers = offers.filter((offer) => !isBasicEconomy(offer));
+    }
+    offers = filterOffersByPreferences(offers, options);
+    if (offers.length === 0) {
+      grid.push({ ...cell, price: null, airline: null, stops: null, duration_minutes: null });
+      continue;
+    }
+
+    const best = offers.reduce((cheapest, offer) => (offer.price < cheapest.price ? offer : cheapest));
+    grid.push({
+      ...cell,
+      price: best.price,
+      airline: best.airline,
+      stops: best.stops,
+      duration_minutes: best.duration_minutes,
+    });
+  }
+
+  const priced = grid.filter((entry) => entry.price !== null);
+  const byPrice = [...priced].sort(
+    (a, b) => (a.price as number) - (b.price as number) || a.departure_date.localeCompare(b.departure_date)
+  );
+
+  const cheapestByDeparture: RoundTripGridEntry[] = [];
+  for (const entry of byPrice) {
+    if (!cheapestByDeparture.some((seen) => seen.departure_date === entry.departure_date)) {
+      cheapestByDeparture.push(entry);
+    }
+  }
+
+  const cheapestByNights: Array<{ nights: number; entry: RoundTripGridEntry }> = [];
+  for (const entry of byPrice) {
+    if (!cheapestByNights.some((seen) => seen.nights === entry.nights)) {
+      cheapestByNights.push({ nights: entry.nights, entry });
+    }
+  }
+
+  const notes: string[] = [
+    `Priced ${grid.length} round-trip cell(s): ${departureDates.length} departure date(s) x ${nightsList.length} trip length(s).`,
+  ];
+  if (truncated) {
+    notes.push(
+      `The requested grid had ${totalPossible} cells; only the first ${cells.length} were priced to stay polite to Google. Narrow the window or trip-length range for fuller coverage.`
+    );
+  }
+  if (!cabinHonored) {
+    notes.push(
+      `Google did not apply the ${options.seat_class.replace('_', ' ')} cabin filter for this query, so these fares may be from a lower cabin.`
+    );
+  }
+
+  return {
+    grid,
+    cheapest: byPrice[0] ?? null,
+    cheapest_by_departure: cheapestByDeparture,
+    cheapest_by_nights: cheapestByNights,
+    searched_pairs: grid.length,
+    truncated,
+    date_range: { from: options.start_date, to: options.end_date },
+    currency: options.currency,
+    cabin_honored: cabinHonored,
+    search_url: anchorUrl,
+    notes,
+  };
+}

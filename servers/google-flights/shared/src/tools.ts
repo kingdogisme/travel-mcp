@@ -4,6 +4,8 @@ import type { FlightsClientFactory } from './server.js';
 import { searchFlightsTool } from './tools/search-flights.js';
 import { getDateGridTool } from './tools/get-date-grid.js';
 import { findAirportCodeTool } from './tools/find-airport-code.js';
+import { searchMultiCityTool } from './tools/search-multi-city.js';
+import { getRoundTripGridTool } from './tools/get-round-trip-grid.js';
 
 interface Tool {
   name: string;
@@ -21,7 +23,13 @@ interface Tool {
 
 type ToolFactory = (server: Server, clientFactory: FlightsClientFactory) => Tool;
 
-const ALL_TOOLS: ToolFactory[] = [searchFlightsTool, getDateGridTool, findAirportCodeTool];
+const ALL_TOOLS: ToolFactory[] = [
+  searchFlightsTool,
+  searchMultiCityTool,
+  getDateGridTool,
+  getRoundTripGridTool,
+  findAirportCodeTool,
+];
 
 export function getAllToolNames(): string[] {
   const mockServer = { setRequestHandler: () => {} } as unknown as Server;

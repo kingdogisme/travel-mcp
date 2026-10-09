@@ -147,6 +147,18 @@ export interface SearchFlightsOptions {
   max_duration_minutes?: number;
   /** Drop itineraries with any single connection longer than this many minutes. */
   max_layover_minutes?: number;
+  /** Keep only itineraries with a free carry-on bag. */
+  require_carry_on?: boolean;
+  /** Keep only itineraries with at least one free checked bag. */
+  require_checked_bag?: boolean;
+  /** Keep only itineraries whose connections are all at these airports (IATA codes). */
+  layover_airports?: string[];
+  /** Drop itineraries that connect at any of these airports (IATA codes). */
+  exclude_layover_airports?: string[];
+  /** Keep only itineraries whose carriers all belong to these alliances (e.g. ["Star Alliance"]). */
+  alliances?: string[];
+  /** Drop itineraries that include a carrier from any of these alliances. */
+  exclude_alliances?: string[];
 }
 
 export interface SearchFlightsResult {
@@ -218,7 +230,161 @@ export interface GetDateGridOptions {
   max_duration_minutes?: number;
   /** Drop itineraries with any connection longer than this many minutes. */
   max_layover_minutes?: number;
+  /** Keep only itineraries with a free carry-on bag. */
+  require_carry_on?: boolean;
+  /** Keep only itineraries with at least one free checked bag. */
+  require_checked_bag?: boolean;
+  /** Keep only itineraries whose connections are all at these airports (IATA codes). */
+  layover_airports?: string[];
+  /** Drop itineraries that connect at any of these airports (IATA codes). */
+  exclude_layover_airports?: string[];
+  /** Keep only itineraries whose carriers all belong to these alliances (e.g. ["Star Alliance"]). */
+  alliances?: string[];
+  /** Drop itineraries that include a carrier from any of these alliances. */
+  exclude_alliances?: string[];
 }
 
 export type SeatClass = 'economy' | 'premium_economy' | 'business' | 'first';
 export type TripType = 'one_way' | 'round_trip';
+
+// =============================================================================
+// MULTI-CITY SEARCH
+//
+// Google Flights prices a multi-city trip leg by leg rather than returning a
+// single combined itinerary, so we search each leg as its own one-way trip and
+// report the options per leg plus the sum of the cheapest fares.
+// =============================================================================
+
+export interface MultiCityLeg {
+  origin: string;
+  destination: string;
+  /** Leg departure date, YYYY-MM-DD. */
+  date: string;
+}
+
+export interface MultiCityLegResult {
+  leg: MultiCityLeg;
+  total_results: number;
+  search_url: string;
+  cabin_honored: boolean;
+  options: FlightOffer[];
+  notes: string[];
+}
+
+export interface MultiCityResult {
+  legs: MultiCityLegResult[];
+  /** Sum of the cheapest fare on each leg, when every leg returned a fare. */
+  cheapest_total: {
+    currency: string;
+    total: number;
+    /** Cheapest fare for each leg, in leg order. */
+    per_leg: number[];
+    airlines: string[];
+  } | null;
+  notes: string[];
+}
+
+export interface SearchMultiCityOptions {
+  legs: MultiCityLeg[];
+  seat_class: 'economy' | 'premium_economy' | 'business' | 'first';
+  adults: number;
+  children: number;
+  infants_in_seat: number;
+  infants_on_lap: number;
+  max_stops: 'any' | 'nonstop' | '1' | '2';
+  sort_by: 'best' | 'price' | 'duration' | 'departure' | 'arrival' | 'emissions';
+  /** Maximum number of options to return per leg. */
+  max_results: number;
+  currency: string;
+  exclude_basic_economy: boolean;
+  max_emissions_percent?: number;
+  airlines?: string[];
+  exclude_airlines?: string[];
+  departure_after?: string;
+  departure_before?: string;
+  arrival_after?: string;
+  arrival_before?: string;
+  max_duration_minutes?: number;
+  max_layover_minutes?: number;
+  /** Keep only itineraries with a free carry-on bag. */
+  require_carry_on?: boolean;
+  /** Keep only itineraries with at least one free checked bag. */
+  require_checked_bag?: boolean;
+  /** Keep only itineraries whose connections are all at these airports (IATA codes). */
+  layover_airports?: string[];
+  /** Drop itineraries that connect at any of these airports (IATA codes). */
+  exclude_layover_airports?: string[];
+  /** Keep only itineraries whose carriers all belong to these alliances (e.g. ["Star Alliance"]). */
+  alliances?: string[];
+  /** Drop itineraries that include a carrier from any of these alliances. */
+  exclude_alliances?: string[];
+}
+
+// =============================================================================
+// ROUND-TRIP DATE GRID
+//
+// Prices a grid of round trips: each departure date in a window crossed with a
+// range of trip lengths (nights). Every cell is a real round-trip search, so the
+// number of live lookups is capped for politeness.
+// =============================================================================
+
+export interface RoundTripGridOptions {
+  origin: string | string[];
+  destination: string | string[];
+  /** First departure date to consider (YYYY-MM-DD). */
+  start_date: string;
+  /** Last departure date to consider (YYYY-MM-DD). */
+  end_date: string;
+  /** Shortest trip length to price, in nights. */
+  min_nights: number;
+  /** Longest trip length to price, in nights. */
+  max_nights: number;
+  seat_class: SeatClass;
+  adults: number;
+  currency: string;
+  /** How many departure dates to sample across the window (default 4). */
+  max_departure_dates: number;
+  /** Hard cap on live round-trip lookups for this call (default 12, hard max 18). */
+  max_pairs: number;
+  exclude_basic_economy: boolean;
+  airlines?: string[];
+  exclude_airlines?: string[];
+  alliances?: string[];
+  exclude_alliances?: string[];
+  require_checked_bag?: boolean;
+  max_layover_minutes?: number;
+  max_duration_minutes?: number;
+}
+
+export interface RoundTripGridEntry {
+  departure_date: string;
+  return_date: string;
+  /** Trip length in nights. */
+  nights: number;
+  /** Cheapest fare for this cell, or null when nothing matched. */
+  price: number | null;
+  airline: string | null;
+  stops: number | null;
+  duration_minutes: number | null;
+}
+
+export interface RoundTripGridResult {
+  /** One entry per (departure date, trip length) cell that was priced. */
+  grid: RoundTripGridEntry[];
+  /** The cheapest priced cell overall. */
+  cheapest: RoundTripGridEntry | null;
+  /** The cheapest priced cell for each departure date, cheapest first. */
+  cheapest_by_departure: RoundTripGridEntry[];
+  /** The cheapest priced cell for each trip length, cheapest first. */
+  cheapest_by_nights: Array<{ nights: number; entry: RoundTripGridEntry }>;
+  /** Number of live round-trip lookups actually made. */
+  searched_pairs: number;
+  /** True when the requested grid had more cells than the lookup cap allowed. */
+  truncated: boolean;
+  date_range: { from: string; to: string } | null;
+  currency: string;
+  /** False when Google returned fares from a different cabin than requested. */
+  cabin_honored: boolean;
+  search_url: string;
+  notes: string[];
+}
