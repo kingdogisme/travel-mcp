@@ -621,6 +621,87 @@ function filterByStops(
   return offers.filter((o) => o.stops <= maxStopsNum);
 }
 
+function minutesOfDay(time: string): number | null {
+  const [hours, minutes] = time.split(':').map((part) => Number(part));
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+  return hours * 60 + minutes;
+}
+
+/** Local-time window check; unparseable times are kept rather than dropped. */
+function withinWindow(time: string, after?: string, before?: string): boolean {
+  const value = minutesOfDay(time);
+  if (value === null) return true;
+  if (after) {
+    const from = minutesOfDay(after);
+    if (from !== null && value < from) return false;
+  }
+  if (before) {
+    const to = minutesOfDay(before);
+    if (to !== null && value > to) return false;
+  }
+  return true;
+}
+
+function matchesAirlineList(offer: FlightOffer, wanted: string[]): boolean {
+  const codes = wanted.map((value) => value.trim().toUpperCase());
+  const names = wanted.map((value) => value.trim().toLowerCase());
+  return offer.segments.some(
+    (segment) =>
+      codes.includes(segment.airline_code.toUpperCase()) ||
+      names.includes(segment.airline.toLowerCase())
+  );
+}
+
+/**
+ * Airline, time-of-day, duration and layover preferences. Google's own query
+ * does not cover these, so they are applied to the parsed offers.
+ */
+export type OfferPreferences = Pick<
+  SearchFlightsOptions,
+  | 'airlines'
+  | 'exclude_airlines'
+  | 'departure_after'
+  | 'departure_before'
+  | 'arrival_after'
+  | 'arrival_before'
+  | 'max_duration_minutes'
+  | 'max_layover_minutes'
+>;
+
+export function filterOffersByPreferences(
+  offers: FlightOffer[],
+  options: OfferPreferences
+): FlightOffer[] {
+  let filtered = offers;
+
+  if (options.airlines && options.airlines.length > 0) {
+    filtered = filtered.filter((offer) => matchesAirlineList(offer, options.airlines!));
+  }
+  if (options.exclude_airlines && options.exclude_airlines.length > 0) {
+    filtered = filtered.filter((offer) => !matchesAirlineList(offer, options.exclude_airlines!));
+  }
+  if (options.departure_after || options.departure_before) {
+    filtered = filtered.filter((offer) =>
+      withinWindow(offer.departure, options.departure_after, options.departure_before)
+    );
+  }
+  if (options.arrival_after || options.arrival_before) {
+    filtered = filtered.filter((offer) =>
+      withinWindow(offer.arrival, options.arrival_after, options.arrival_before)
+    );
+  }
+  if (options.max_duration_minutes !== undefined) {
+    const limit = options.max_duration_minutes;
+    filtered = filtered.filter((offer) => offer.duration_minutes <= limit);
+  }
+  if (options.max_layover_minutes !== undefined) {
+    const limit = options.max_layover_minutes;
+    filtered = filtered.filter((offer) => offer.layovers.every((l) => l.minutes <= limit));
+  }
+
+  return filtered;
+}
+
 // Determine whether an offer is a true basic-economy fare for the purposes of
 // the exclude_basic_economy filter.
 //
@@ -857,6 +938,9 @@ export async function searchFlights(options: SearchFlightsOptions): Promise<Sear
   // Apply client-side stop filter (supplements the protobuf filter)
   allOffers = filterByStops(allOffers, options.max_stops);
 
+  // Airline / time-of-day / duration / layover preferences
+  allOffers = filterOffersByPreferences(allOffers, options);
+
   // Drop itineraries above the emissions threshold (percent above typical).
   if (options.max_emissions_percent !== undefined) {
     const limit = options.max_emissions_percent;
@@ -989,6 +1073,7 @@ export async function getDateGrid(options: GetDateGridOptions): Promise<DateGrid
     if (options.exclude_basic_economy) {
       offers = offers.filter((offer) => !isBasicEconomy(offer));
     }
+    offers = filterOffersByPreferences(offers, options);
     if (offers.length === 0) {
       noResults.push(date);
       continue;
@@ -1092,4 +1177,4 @@ export async function findAirportCode(query: string): Promise<AirportResult[]> {
 }
 
 // For testing: export the internal parser
-export { extractDs1, parseFlightOffers, formatTime, formatDate };
+export { extractDs1, parseFlightOffers, formatTime, formatDate, filterByStops };

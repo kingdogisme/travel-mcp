@@ -74,6 +74,46 @@ export const SearchFlightsSchema = z.object({
     .max(3)
     .default('USD')
     .describe('Currency code for prices (e.g., "USD", "EUR", "GBP")'),
+  airlines: z
+    .array(z.string())
+    .optional()
+    .describe('Keep only these airlines, by IATA code or name, e.g. ["UA", "ANA"].'),
+  exclude_airlines: z
+    .array(z.string())
+    .optional()
+    .describe('Drop these airlines, by IATA code or name, e.g. ["NK"].'),
+  departure_after: z
+    .string()
+    .regex(/^\d{2}:\d{2}$/)
+    .optional()
+    .describe('Earliest local departure time, "HH:MM" (e.g. "08:00").'),
+  departure_before: z
+    .string()
+    .regex(/^\d{2}:\d{2}$/)
+    .optional()
+    .describe('Latest local departure time, "HH:MM" (e.g. "20:00").'),
+  arrival_after: z
+    .string()
+    .regex(/^\d{2}:\d{2}$/)
+    .optional()
+    .describe('Earliest local arrival time, "HH:MM".'),
+  arrival_before: z
+    .string()
+    .regex(/^\d{2}:\d{2}$/)
+    .optional()
+    .describe('Latest local arrival time, "HH:MM".'),
+  max_duration_minutes: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Drop itineraries longer than this many minutes, door to door.'),
+  max_layover_minutes: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Drop itineraries with any single connection longer than this many minutes.'),
   exclude_basic_economy: z
     .boolean()
     .default(true)
@@ -103,6 +143,8 @@ Each offer also carries:
 Pagination: The response includes has_more (boolean) and next_offset (number or null). To get the next page, call search_flights again with the same parameters but set offset to next_offset. Keep paginating while has_more is true. Each page returns up to max_results flights.
 
 Cabin handling: Google ignores the cabin enum inside its protobuf query, so business and first searches are issued through Google's natural-language endpoint instead — those honour the cabin but return a smaller set of fares. Premium economy is not understood by that endpoint; when that happens the response carries cabin_honored: false plus a note in notes, and the fares may be from a lower cabin.
+
+Result-side filters Google's query cannot express are applied locally: airlines / exclude_airlines, departure_after / departure_before, arrival_after / arrival_before (all "HH:MM" local time), max_duration_minutes and max_layover_minutes. total_results reflects the filtered count.
 
 Multiple airports per leg are supported (e.g. "SFO,OAK,SJC" as origin, "NRT,HND" as destination) — useful for metro areas with several airports.
 
@@ -187,6 +229,34 @@ Use get_date_grid to find the cheapest dates before searching.`,
           type: 'boolean',
           description:
             'Exclude basic economy fares (default: true). Set to false to include all fare tiers.',
+        },
+        airlines: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Keep only these airlines, by IATA code or name, e.g. ["UA", "ANA"]',
+        },
+        exclude_airlines: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Drop these airlines, by IATA code or name, e.g. ["NK"]',
+        },
+        departure_after: {
+          type: 'string',
+          description: 'Earliest local departure time "HH:MM" (e.g. "08:00")',
+        },
+        departure_before: {
+          type: 'string',
+          description: 'Latest local departure time "HH:MM" (e.g. "20:00")',
+        },
+        arrival_after: { type: 'string', description: 'Earliest local arrival time "HH:MM"' },
+        arrival_before: { type: 'string', description: 'Latest local arrival time "HH:MM"' },
+        max_duration_minutes: {
+          type: 'number',
+          description: 'Drop itineraries longer than this many minutes',
+        },
+        max_layover_minutes: {
+          type: 'number',
+          description: 'Drop itineraries with any connection longer than this many minutes',
         },
       },
       required: ['origin', 'destination', 'departure_date'],

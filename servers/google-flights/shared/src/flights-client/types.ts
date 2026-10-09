@@ -131,6 +131,22 @@ export interface SearchFlightsOptions {
   exclude_basic_economy: boolean;
   /** Keep only itineraries whose emissions are at most this percent above typical. */
   max_emissions_percent?: number;
+  /** Keep only these airlines (IATA codes or names, case-insensitive). */
+  airlines?: string[];
+  /** Drop these airlines (IATA codes or names, case-insensitive). */
+  exclude_airlines?: string[];
+  /** Earliest acceptable local departure time, "HH:MM". */
+  departure_after?: string;
+  /** Latest acceptable local departure time, "HH:MM". */
+  departure_before?: string;
+  /** Earliest acceptable local arrival time, "HH:MM". */
+  arrival_after?: string;
+  /** Latest acceptable local arrival time, "HH:MM". */
+  arrival_before?: string;
+  /** Drop itineraries longer than this many minutes, door to door. */
+  max_duration_minutes?: number;
+  /** Drop itineraries with any single connection longer than this many minutes. */
+  max_layover_minutes?: number;
 }
 
 export interface SearchFlightsResult {
@@ -188,6 +204,18 @@ export interface GetDateGridOptions {
   max_dates?: number;
   /** Drop dates whose cheapest fare is basic economy. */
   exclude_basic_economy?: boolean;
+  /** Keep only these airlines (IATA codes or names, case-insensitive). */
+  airlines?: string[];
+  /** Drop these airlines (IATA codes or names, case-insensitive). */
+  exclude_airlines?: string[];
+  /** Earliest acceptable local departure time, "HH:MM". */
+  departure_after?: string;
+  /** Latest acceptable local departure time, "HH:MM". */
+  departure_before?: string;
+  /** Drop itineraries longer than this many minutes. */
+  max_duration_minutes?: number;
+  /** Drop itineraries with any connection longer than this many minutes. */
+  max_layover_minutes?: number;
 }
 
 export type SeatClass = 'economy' | 'premium_economy' | 'business' | 'first';

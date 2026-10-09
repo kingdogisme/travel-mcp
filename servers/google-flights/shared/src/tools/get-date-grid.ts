@@ -73,6 +73,36 @@ export const GetDateGridSchema = z.object({
     .boolean()
     .default(true)
     .describe('Ignore basic-economy fares when picking the cheapest fare for a date'),
+  airlines: z
+    .array(z.string())
+    .optional()
+    .describe('Price only these airlines, by IATA code or name, e.g. ["UA"]'),
+  exclude_airlines: z
+    .array(z.string())
+    .optional()
+    .describe('Ignore these airlines, by IATA code or name'),
+  departure_after: z
+    .string()
+    .regex(/^\d{2}:\d{2}$/)
+    .optional()
+    .describe('Earliest local departure time, "HH:MM"'),
+  departure_before: z
+    .string()
+    .regex(/^\d{2}:\d{2}$/)
+    .optional()
+    .describe('Latest local departure time, "HH:MM"'),
+  max_duration_minutes: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Ignore itineraries longer than this many minutes'),
+  max_layover_minutes: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Ignore itineraries with any connection longer than this many minutes'),
 });
 
 export function getDateGridTool(_server: Server, clientFactory: FlightsClientFactory) {
@@ -85,6 +115,8 @@ Prices each date in a window with a live Google Flights lookup and returns the c
 Give it a window (start_date / end_date, optional weekdays filter) and it prices each date in turn — one polite request per date, capped by max_dates (default 7, hard max 14). Because every date is a real search, results are current rather than cached.
 
 The response also includes price_history, Google's own low-price series for the route over the past ~60 days, and price_insights with Google's read on whether prices are currently low, typical or high. Great for deal-hunting when the user has flexibility on travel dates — call this first to find the cheapest day, then use search_flights on that date.
+
+The same result-side filters as search_flights are available here — airlines / exclude_airlines, departure_after / departure_before, max_duration_minutes and max_layover_minutes — so "cheapest day to fly United, arriving before noon" is one call.
 
 The grid typically covers ~60 days around the anchor date.`,
     inputSchema: {
@@ -145,6 +177,32 @@ The grid typically covers ~60 days around the anchor date.`,
         exclude_basic_economy: {
           type: 'boolean',
           description: 'Ignore basic-economy fares when picking a date\'s cheapest fare (default true)',
+        },
+        airlines: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Price only these airlines, by IATA code or name, e.g. ["UA"]',
+        },
+        exclude_airlines: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Ignore these airlines, by IATA code or name',
+        },
+        departure_after: {
+          type: 'string',
+          description: 'Earliest local departure time "HH:MM"',
+        },
+        departure_before: {
+          type: 'string',
+          description: 'Latest local departure time "HH:MM"',
+        },
+        max_duration_minutes: {
+          type: 'number',
+          description: 'Ignore itineraries longer than this many minutes',
+        },
+        max_layover_minutes: {
+          type: 'number',
+          description: 'Ignore itineraries with any connection longer than this many minutes',
         },
       },
       required: ['origin', 'destination'],
