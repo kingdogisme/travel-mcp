@@ -36,9 +36,11 @@ export const FlightSearchParamsSchema = z.object({
     .optional()
     .describe('Return date in YYYY-MM-DD format (required for round-trip)'),
   tripType: z
-    .enum(['1', '2'])
+    .enum(['1', '2', '3'])
     .default('2')
-    .describe('Trip type: "1" for one-way, "2" for round-trip. Default: "2"'),
+    .describe(
+      'Trip type: "1" one-way, "2" round-trip, "3" multi-city (requires departure2 / arrival2 / departDate2). Default: "2"'
+    ),
   adults: z.number().min(1).max(9).default(1).describe('Number of adult passengers. Default: 1'),
   children: z.number().min(0).max(9).default(0).describe('Number of child passengers. Default: 0'),
   cabins: z
@@ -76,6 +78,24 @@ export const FlightSearchParamsSchema = z.object({
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .optional()
     .describe('Last return date of a flexible-date window (requires multiday: true)'),
+  departure2: z
+    .string()
+    .optional()
+    .describe('Second leg origin (multi-city / tripType "3")'),
+  arrival2: z
+    .string()
+    .optional()
+    .describe('Second leg destination (multi-city / tripType "3")'),
+  departDate2: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional()
+    .describe('Second leg departure date (multi-city / tripType "3")'),
+  departDateTo2: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional()
+    .describe('Second leg end date for a flexible-date window'),
   transferBonusOnly: z
     .boolean()
     .default(false)

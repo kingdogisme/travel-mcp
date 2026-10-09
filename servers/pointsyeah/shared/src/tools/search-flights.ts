@@ -17,8 +17,8 @@ const PARAM_DESCRIPTIONS = {
     'Return date in YYYY-MM-DD format. Required for round-trip searches. ' +
     'Example: "2026-04-08". Must be after departDate.',
   tripType:
-    'Trip type: "1" for one-way, "2" for round-trip. Default: "2". ' +
-    'Set to "1" if you only need outbound flights.',
+    'Trip type: "1" for one-way, "2" for round-trip, "3" for multi-city. Default: "2". ' +
+    'Set to "1" if you only need outbound flights, or "3" with departure2 / arrival2 / departDate2 for a two-leg trip.',
   adults: 'Number of adult passengers (1-9). Default: 1.',
   children: 'Number of child passengers (0-9). Default: 0.',
   cabins:
@@ -103,7 +103,7 @@ export function searchFlightsTool(_server: Server, clientFactory: () => IPointsY
         returnDate: { type: 'string', description: PARAM_DESCRIPTIONS.returnDate },
         tripType: {
           type: 'string',
-          enum: ['1', '2'],
+          enum: ['1', '2', '3'],
           default: '2',
           description: PARAM_DESCRIPTIONS.tripType,
         },
@@ -155,6 +155,16 @@ export function searchFlightsTool(_server: Server, clientFactory: () => IPointsY
           type: 'string',
           description: 'Last return date (YYYY-MM-DD) of a flexible-date window',
         },
+        departure2: { type: 'string', description: 'Second leg origin (multi-city)' },
+        arrival2: { type: 'string', description: 'Second leg destination (multi-city)' },
+        departDate2: {
+          type: 'string',
+          description: 'Second leg departure date YYYY-MM-DD (multi-city, tripType "3")',
+        },
+        departDateTo2: {
+          type: 'string',
+          description: 'Second leg end date for a flexible window',
+        },
         transferBonusOnly: {
           type: 'boolean',
           description: 'Only return options with a currently active bank transfer bonus',
@@ -191,6 +201,18 @@ export function searchFlightsTool(_server: Server, clientFactory: () => IPointsY
       try {
         const params = FlightSearchParamsSchema.parse(args);
 
+        if (params.tripType === '3' && !(params.departure2 && params.arrival2 && params.departDate2)) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: 'Error: multi-city searches need departure2, arrival2 and departDate2.',
+              },
+            ],
+            isError: true,
+          };
+        }
+
         if (params.tripType === '2' && !params.returnDate) {
           return {
             content: [
@@ -220,8 +242,12 @@ export function searchFlightsTool(_server: Server, clientFactory: () => IPointsY
         const header = [
           `## Award Flight Search Results`,
           '',
-          `**Route:** ${params.departure} -> ${params.arrival}`,
-          `**Date:** ${params.departDate}${params.returnDate ? ` - ${params.returnDate}` : ''}`,
+          `**Route:** ${params.departure} -> ${params.arrival}${
+            params.departure2 ? `, ${params.departure2} -> ${params.arrival2}` : ''
+          }`,
+          `**Date:** ${params.departDate}${params.returnDate ? ` - ${params.returnDate}` : ''}${
+            params.departDate2 ? ` | leg 2: ${params.departDate2}` : ''
+          }`,
           `**Passengers:** ${params.adults} adult(s)${params.children ? `, ${params.children} child(ren)` : ''}`,
           `**Cabins:** ${params.cabins.join(', ')}`,
           params.multiday || params.departDateTo

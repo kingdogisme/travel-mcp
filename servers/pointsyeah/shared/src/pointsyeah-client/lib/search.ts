@@ -79,6 +79,14 @@ export function buildSearchUrl(params: FlightSearchParams): string {
     urlParams.set('returnDateSec', params.returnDateTo ?? params.returnDate);
   }
 
+  // Multi-city: PointsYeah takes a second leg as flat departure2/arrival2 params.
+  if (params.departure2) urlParams.set('departure2', params.departure2);
+  if (params.arrival2) urlParams.set('arrival2', params.arrival2);
+  if (params.departDate2) {
+    urlParams.set('departDate2', params.departDate2);
+    urlParams.set('departDateSec2', params.departDateTo2 ?? params.departDate2);
+  }
+
   return `https://www.pointsyeah.com/search?${urlParams.toString()}`;
 }
 
