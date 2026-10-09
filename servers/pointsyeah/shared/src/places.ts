@@ -1,37 +1,38 @@
 /**
- * PointsYeah's live search only accepts IATA codes — a city name like "Tokyo"
- * makes the API answer 404 — so the tools accept the common city names and
- * resolve them here before a search is built.
+ * PointsYeah's live search only accepts concrete IATA airport codes. A city
+ * name like "Tokyo" makes the API answer 404, and a metro pseudo-code such as
+ * "TYO" or "LON" is accepted but matched against nothing, so the search comes
+ * back empty. Both are resolved here to the city's main airport before a
+ * search is built.
  *
- * The multi-airport entries mirror the metro map on the Google Flights server
- * (servers/google-flights/shared/src/flights-client/flights-client.ts,
- * CITY_METRO_CODES); the single-airport entries exist because PointsYeah has no
- * name lookup of its own. Codes pass through untouched, so anything outside
- * this table still works as long as the caller passes an IATA code.
+ * Every entry maps to a single airport rather than a metro code: PointsYeah
+ * searches one airport per side, so a caller who wants a different airport
+ * (HND instead of NRT, LGW instead of LHR) passes that IATA code directly.
+ * Codes outside this table pass through untouched.
  */
 const CITY_CODES: Record<string, string> = {
-  // Multi-airport metros (same codes Google Flights uses)
-  london: 'LON',
-  'new york': 'NYC',
-  tokyo: 'TYO',
-  osaka: 'OSA',
-  paris: 'PAR',
-  milan: 'MIL',
-  rome: 'ROM',
-  moscow: 'MOW',
-  seoul: 'SEL',
-  beijing: 'BJS',
-  shanghai: 'SHA',
-  washington: 'WAS',
-  chicago: 'CHI',
-  toronto: 'YTO',
-  montreal: 'YMQ',
-  'sao paulo': 'SAO',
-  'rio de janeiro': 'RIO',
-  'buenos aires': 'BUE',
-  stockholm: 'STO',
-  jakarta: 'JKT',
-  houston: 'HOU',
+  // Multi-airport metros -> their main airport
+  london: 'LHR',
+  'new york': 'JFK',
+  tokyo: 'NRT',
+  osaka: 'KIX',
+  paris: 'CDG',
+  milan: 'MXP',
+  rome: 'FCO',
+  moscow: 'SVO',
+  seoul: 'ICN',
+  beijing: 'PEK',
+  shanghai: 'PVG',
+  washington: 'IAD',
+  chicago: 'ORD',
+  toronto: 'YYZ',
+  montreal: 'YUL',
+  'sao paulo': 'GRU',
+  'rio de janeiro': 'GIG',
+  'buenos aires': 'EZE',
+  stockholm: 'ARN',
+  jakarta: 'CGK',
+  houston: 'IAH',
   dallas: 'DFW',
   miami: 'MIA',
   // Asia
@@ -95,7 +96,7 @@ const CITY_CODES: Record<string, string> = {
   budapest: 'BUD',
   edinburgh: 'EDI',
   manchester: 'MAN',
-  reykjavik: 'REK',
+  reykjavik: 'KEF',
   // Americas
   'los angeles': 'LAX',
   'san francisco': 'SFO',
@@ -128,6 +129,35 @@ const CITY_CODES: Record<string, string> = {
   guam: 'GUM',
 };
 
+/**
+ * Metro pseudo-codes a caller may pass directly. They look like IATA codes but
+ * are not airports, so PointsYeah would silently return nothing; map each to
+ * the city's main airport instead.
+ */
+const METRO_CODES: Record<string, string> = {
+  LON: 'LHR',
+  NYC: 'JFK',
+  TYO: 'NRT',
+  OSA: 'KIX',
+  PAR: 'CDG',
+  MIL: 'MXP',
+  ROM: 'FCO',
+  MOW: 'SVO',
+  SEL: 'ICN',
+  BJS: 'PEK',
+  SHA: 'PVG',
+  WAS: 'IAD',
+  CHI: 'ORD',
+  YTO: 'YYZ',
+  YMQ: 'YUL',
+  SAO: 'GRU',
+  RIO: 'GIG',
+  BUE: 'EZE',
+  STO: 'ARN',
+  JKT: 'CGK',
+  REK: 'KEF',
+};
+
 const IATA_RE = /^[A-Za-z]{3}$/;
 
 /** Trim and normalise a city name into a lookup key. */
@@ -136,13 +166,17 @@ function cityKey(value: string): string {
 }
 
 /**
- * Resolve a user-supplied place into something PointsYeah accepts: an IATA code
- * passes through (upper-cased), a known city name becomes its code, and anything
- * else is rejected with an actionable message instead of the API's bare 404.
+ * Resolve a user-supplied place into something PointsYeah actually searches:
+ * an airport code passes through (upper-cased), a metro pseudo-code becomes its
+ * main airport, a known city name becomes its main airport, and anything else is
+ * rejected with an actionable message instead of a silently empty search.
  */
 export function resolvePlaceCode(value: string): string {
   const trimmed = value.trim();
-  if (IATA_RE.test(trimmed)) return trimmed.toUpperCase();
+  if (IATA_RE.test(trimmed)) {
+    const code = trimmed.toUpperCase();
+    return METRO_CODES[code] ?? code;
+  }
 
   const known = CITY_CODES[cityKey(trimmed)];
   if (known) return known;

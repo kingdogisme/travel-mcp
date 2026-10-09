@@ -45,10 +45,21 @@ describe('resolvePlaceCode', () => {
     expect(resolvePlaceCode(' NRT ')).toBe('NRT');
   });
 
-  it('resolves multi-airport metro names to the metro code', () => {
-    expect(resolvePlaceCode('London')).toBe('LON');
-    expect(resolvePlaceCode('new york')).toBe('NYC');
-    expect(resolvePlaceCode('Tokyo')).toBe('TYO');
+  it('resolves multi-airport city names to their main airport', () => {
+    expect(resolvePlaceCode('London')).toBe('LHR');
+    expect(resolvePlaceCode('new york')).toBe('JFK');
+    expect(resolvePlaceCode('Tokyo')).toBe('NRT');
+  });
+
+  it('maps a metro pseudo-code to its main airport', () => {
+    expect(resolvePlaceCode('TYO')).toBe('NRT');
+    expect(resolvePlaceCode('NYC')).toBe('JFK');
+    expect(resolvePlaceCode('lon')).toBe('LHR');
+  });
+
+  it('leaves a real airport code alone', () => {
+    expect(resolvePlaceCode('HND')).toBe('HND');
+    expect(resolvePlaceCode('MIA')).toBe('MIA');
   });
 
   it('resolves single-airport city names', () => {
@@ -69,7 +80,7 @@ describe('resolvePlaceCode', () => {
 
 describe('resolvePlaceCodes', () => {
   it('resolves each entry and drops blanks', () => {
-    expect(resolvePlaceCodes(['SFO', 'Tokyo', '  '])).toEqual(['SFO', 'TYO']);
+    expect(resolvePlaceCodes(['SFO', 'Tokyo', '  '])).toEqual(['SFO', 'NRT']);
   });
 });
 
@@ -93,7 +104,7 @@ describe('PointsYeah city-name resolution wiring', () => {
 
     const [sentParams] = vi.mocked(createSearchTask).mock.calls[0];
     expect(sentParams.departure).toBe('SFO');
-    expect(sentParams.arrival).toBe('TYO');
+    expect(sentParams.arrival).toBe('NRT');
   }, 15000);
 
   it('rejects an unknown place before touching the network', async () => {
@@ -126,7 +137,7 @@ describe('PointsYeah city-name resolution wiring', () => {
 
       const info = (bodies[0] as { info: { departure: string; arrival: string } }).info;
       expect(info.departure).toBe('SFO');
-      expect(info.arrival).toBe('TYO');
+      expect(info.arrival).toBe('NRT');
     } finally {
       fetchSpy.mockRestore();
     }
