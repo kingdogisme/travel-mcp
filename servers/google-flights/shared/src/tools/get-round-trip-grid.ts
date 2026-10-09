@@ -72,6 +72,19 @@ export const GetRoundTripGridSchema = z.object({
     .describe('Keep only itineraries with at least one free checked bag'),
   max_layover_minutes: z.number().int().positive().optional().describe('Drop long connections'),
   max_duration_minutes: z.number().int().positive().optional().describe('Drop long itineraries'),
+  max_price: z.number().positive().optional().describe('Drop offers priced above this amount'),
+  exclude_redeye: z
+    .boolean()
+    .optional()
+    .describe('Drop itineraries that depart between 22:00 and 06:00 local time'),
+  aircraft_types: z
+    .array(z.string())
+    .optional()
+    .describe('Keep only itineraries whose segments are all on one of these aircraft types (substring match)'),
+  exclude_aircraft_types: z
+    .array(z.string())
+    .optional()
+    .describe('Drop itineraries that use any of these aircraft types'),
 });
 
 export function getRoundTripGridTool(_server: Server, clientFactory: FlightsClientFactory) {
@@ -83,7 +96,7 @@ Give a departure window (start_date / end_date) and a trip-length range (min_nig
 
 Every cell is its own live Google Flights round-trip search, so the number of lookups is capped by max_pairs (default 12, hard max 18) and the departure dates are sampled evenly across the window (max_departure_dates, default 4). When the requested grid is larger than the cap, the response sets truncated: true and says so in notes.
 
-The same result-side filters as search_flights are available here — airlines / exclude_airlines, alliances / exclude_alliances, require_checked_bag, max_layover_minutes and max_duration_minutes.
+The same result-side filters as search_flights are available here — airlines / exclude_airlines, alliances / exclude_alliances, require_checked_bag, max_layover_minutes, max_duration_minutes, max_price, exclude_redeye and aircraft_types / exclude_aircraft_types.
 
 Use get_date_grid first when only the departure date is flexible; use this when the trip length matters too.`,
     inputSchema: {
@@ -140,6 +153,21 @@ Use get_date_grid first when only the departure date is flexible; use this when 
         },
         max_layover_minutes: { type: 'number', description: 'Drop long connections' },
         max_duration_minutes: { type: 'number', description: 'Drop long itineraries' },
+        max_price: { type: 'number', description: 'Drop offers priced above this amount' },
+        exclude_redeye: {
+          type: 'boolean',
+          description: 'Drop itineraries departing 22:00-06:00 local time',
+        },
+        aircraft_types: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Keep only these aircraft types (substring match)',
+        },
+        exclude_aircraft_types: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Drop these aircraft types (substring match)',
+        },
       },
       required: ['origin', 'destination', 'start_date', 'end_date'],
     },

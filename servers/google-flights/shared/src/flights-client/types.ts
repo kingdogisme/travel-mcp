@@ -159,6 +159,14 @@ export interface SearchFlightsOptions {
   alliances?: string[];
   /** Drop itineraries that include a carrier from any of these alliances. */
   exclude_alliances?: string[];
+  /** Drop offers priced above this amount (in the search currency). */
+  max_price?: number;
+  /** Drop itineraries that depart between 22:00 and 06:00 local time. */
+  exclude_redeye?: boolean;
+  /** Keep only itineraries whose segments are all on one of these aircraft types (substring match). */
+  aircraft_types?: string[];
+  /** Drop itineraries that use any of these aircraft types (substring match). */
+  exclude_aircraft_types?: string[];
 }
 
 export interface SearchFlightsResult {
@@ -242,6 +250,14 @@ export interface GetDateGridOptions {
   alliances?: string[];
   /** Drop itineraries that include a carrier from any of these alliances. */
   exclude_alliances?: string[];
+  /** Drop offers priced above this amount (in the search currency). */
+  max_price?: number;
+  /** Drop itineraries that depart between 22:00 and 06:00 local time. */
+  exclude_redeye?: boolean;
+  /** Keep only itineraries whose segments are all on one of these aircraft types (substring match). */
+  aircraft_types?: string[];
+  /** Drop itineraries that use any of these aircraft types (substring match). */
+  exclude_aircraft_types?: string[];
 }
 
 export type SeatClass = 'economy' | 'premium_economy' | 'business' | 'first';
@@ -318,6 +334,14 @@ export interface SearchMultiCityOptions {
   alliances?: string[];
   /** Drop itineraries that include a carrier from any of these alliances. */
   exclude_alliances?: string[];
+  /** Drop offers priced above this amount (in the search currency). */
+  max_price?: number;
+  /** Drop itineraries that depart between 22:00 and 06:00 local time. */
+  exclude_redeye?: boolean;
+  /** Keep only itineraries whose segments are all on one of these aircraft types (substring match). */
+  aircraft_types?: string[];
+  /** Drop itineraries that use any of these aircraft types (substring match). */
+  exclude_aircraft_types?: string[];
 }
 
 // =============================================================================
@@ -354,6 +378,14 @@ export interface RoundTripGridOptions {
   require_checked_bag?: boolean;
   max_layover_minutes?: number;
   max_duration_minutes?: number;
+  /** Drop offers priced above this amount (in the search currency). */
+  max_price?: number;
+  /** Drop itineraries that depart between 22:00 and 06:00 local time. */
+  exclude_redeye?: boolean;
+  /** Keep only itineraries whose segments are all on one of these aircraft types (substring match). */
+  aircraft_types?: string[];
+  /** Drop itineraries that use any of these aircraft types (substring match). */
+  exclude_aircraft_types?: string[];
 }
 
 export interface RoundTripGridEntry {

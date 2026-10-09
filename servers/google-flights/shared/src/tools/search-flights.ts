@@ -138,6 +138,23 @@ export const SearchFlightsSchema = z.object({
     .array(z.string())
     .optional()
     .describe('Drop itineraries that include a carrier from any of these alliances.'),
+  max_price: z
+    .number()
+    .positive()
+    .optional()
+    .describe('Drop offers priced above this amount (in the search currency).'),
+  exclude_redeye: z
+    .boolean()
+    .optional()
+    .describe('Drop itineraries that depart between 22:00 and 06:00 local time.'),
+  aircraft_types: z
+    .array(z.string())
+    .optional()
+    .describe('Keep only itineraries whose segments are all on one of these aircraft types (substring match, e.g. ["787", "A350"]).'),
+  exclude_aircraft_types: z
+    .array(z.string())
+    .optional()
+    .describe('Drop itineraries that use any of these aircraft types.'),
   exclude_basic_economy: z
     .boolean()
     .default(true)
@@ -169,7 +186,7 @@ Pagination: The response includes has_more (boolean) and next_offset (number or 
 
 Cabin handling: Google ignores the cabin enum inside its protobuf query, so business and first searches are issued through Google's natural-language endpoint instead — those honour the cabin but return a smaller set of fares. Premium economy is not understood by that endpoint; when that happens the response carries cabin_honored: false plus a note in notes, and the fares may be from a lower cabin.
 
-Result-side filters Google's query cannot express are applied locally: airlines / exclude_airlines, alliances / exclude_alliances (Star Alliance, oneworld, SkyTeam), departure_after / departure_before, arrival_after / arrival_before (all "HH:MM" local time), max_duration_minutes, max_layover_minutes, layover_airports / exclude_layover_airports, and require_carry_on / require_checked_bag. total_results reflects the filtered count.
+Result-side filters Google's query cannot express are applied locally: airlines / exclude_airlines, alliances / exclude_alliances (Star Alliance, oneworld, SkyTeam), departure_after / departure_before, arrival_after / arrival_before (all "HH:MM" local time), max_duration_minutes, max_layover_minutes, layover_airports / exclude_layover_airports, and require_carry_on / require_checked_bag, max_price, exclude_redeye and aircraft_types / exclude_aircraft_types. total_results reflects the filtered count.
 
 Multiple airports per leg are supported (e.g. "SFO,OAK,SJC" as origin, "NRT,HND" as destination) — useful for metro areas with several airports.
 
@@ -310,6 +327,24 @@ Use get_date_grid to find the cheapest dates before searching.`,
           type: 'array',
           items: { type: 'string' },
           description: 'Drop itineraries that include a carrier from any of these alliances',
+        },
+        max_price: {
+          type: 'number',
+          description: 'Drop offers priced above this amount (search currency)',
+        },
+        exclude_redeye: {
+          type: 'boolean',
+          description: 'Drop itineraries departing between 22:00 and 06:00 local time',
+        },
+        aircraft_types: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Keep only these aircraft types (substring match, e.g. ["787"])',
+        },
+        exclude_aircraft_types: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Drop these aircraft types (substring match)',
         },
       },
       required: ['origin', 'destination', 'departure_date'],

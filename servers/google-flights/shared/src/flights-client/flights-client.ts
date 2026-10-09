@@ -680,6 +680,10 @@ export type OfferPreferences = Pick<
   | 'exclude_layover_airports'
   | 'alliances'
   | 'exclude_alliances'
+  | 'max_price'
+  | 'exclude_redeye'
+  | 'aircraft_types'
+  | 'exclude_aircraft_types'
 >;
 
 /**
@@ -789,6 +793,36 @@ export function filterOffersByPreferences(
       offerCarrierCodes(offer).every((code) => {
         const alliance = ALLIANCE_BY_AIRLINE[code];
         return alliance === undefined || !banned.has(normalizeAlliance(alliance));
+      })
+    );
+  }
+  if (options.max_price !== undefined) {
+    const limit = options.max_price;
+    filtered = filtered.filter((offer) => offer.price <= limit);
+  }
+  if (options.exclude_redeye) {
+    filtered = filtered.filter((offer) => {
+      const minutes = minutesOfDay(offer.departure);
+      if (minutes === null) return true;
+      return minutes >= 6 * 60 && minutes < 22 * 60;
+    });
+  }
+  if (options.aircraft_types && options.aircraft_types.length > 0) {
+    const wanted = options.aircraft_types.map((value) => value.trim().toLowerCase());
+    filtered = filtered.filter((offer) => {
+      const types = offer.segments
+        .map((segment) => (segment.aircraft ?? '').toLowerCase())
+        .filter((value) => value.length > 0);
+      if (types.length === 0) return false;
+      return types.every((type) => wanted.some((value) => type.includes(value)));
+    });
+  }
+  if (options.exclude_aircraft_types && options.exclude_aircraft_types.length > 0) {
+    const banned = options.exclude_aircraft_types.map((value) => value.trim().toLowerCase());
+    filtered = filtered.filter((offer) =>
+      offer.segments.every((segment) => {
+        const type = (segment.aircraft ?? '').toLowerCase();
+        return type.length === 0 || !banned.some((value) => type.includes(value));
       })
     );
   }
@@ -1143,6 +1177,10 @@ export async function searchMultiCity(options: SearchMultiCityOptions): Promise<
       exclude_layover_airports: options.exclude_layover_airports,
       alliances: options.alliances,
       exclude_alliances: options.exclude_alliances,
+      max_price: options.max_price,
+      exclude_redeye: options.exclude_redeye,
+      aircraft_types: options.aircraft_types,
+      exclude_aircraft_types: options.exclude_aircraft_types,
     });
 
     legs.push({

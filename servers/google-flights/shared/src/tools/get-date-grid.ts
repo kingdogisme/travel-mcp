@@ -127,6 +127,19 @@ export const GetDateGridSchema = z.object({
     .array(z.string())
     .optional()
     .describe('Drop itineraries that include a carrier from any of these alliances'),
+  max_price: z.number().positive().optional().describe('Drop offers priced above this amount'),
+  exclude_redeye: z
+    .boolean()
+    .optional()
+    .describe('Drop itineraries that depart between 22:00 and 06:00 local time'),
+  aircraft_types: z
+    .array(z.string())
+    .optional()
+    .describe('Keep only itineraries whose segments are all on one of these aircraft types (substring match)'),
+  exclude_aircraft_types: z
+    .array(z.string())
+    .optional()
+    .describe('Drop itineraries that use any of these aircraft types'),
 });
 
 export function getDateGridTool(_server: Server, clientFactory: FlightsClientFactory) {
@@ -140,7 +153,7 @@ Give it a window (start_date / end_date, optional weekdays filter) and it prices
 
 The response also includes price_history, Google's own low-price series for the route over the past ~60 days, and price_insights with Google's read on whether prices are currently low, typical or high. Great for deal-hunting when the user has flexibility on travel dates — call this first to find the cheapest day, then use search_flights on that date.
 
-The same result-side filters as search_flights are available here — airlines / exclude_airlines, alliances / exclude_alliances, departure_after / departure_before, max_duration_minutes, max_layover_minutes, layover_airports / exclude_layover_airports and require_carry_on / require_checked_bag — so "cheapest day to fly United, arriving before noon" is one call.
+The same result-side filters as search_flights are available here — airlines / exclude_airlines, alliances / exclude_alliances, departure_after / departure_before, max_duration_minutes, max_layover_minutes, layover_airports / exclude_layover_airports and require_carry_on / require_checked_bag, max_price, exclude_redeye and aircraft_types / exclude_aircraft_types — so "cheapest day to fly United, arriving before noon" is one call.
 
 The grid typically covers ~60 days around the anchor date.`,
     inputSchema: {
@@ -255,6 +268,21 @@ The grid typically covers ~60 days around the anchor date.`,
           type: 'array',
           items: { type: 'string' },
           description: 'Drop itineraries that include a carrier from any of these alliances',
+        },
+        max_price: { type: 'number', description: 'Drop offers priced above this amount' },
+        exclude_redeye: {
+          type: 'boolean',
+          description: 'Drop itineraries departing 22:00-06:00 local time',
+        },
+        aircraft_types: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Keep only these aircraft types (substring match)',
+        },
+        exclude_aircraft_types: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Drop these aircraft types (substring match)',
         },
       },
       required: ['origin', 'destination'],

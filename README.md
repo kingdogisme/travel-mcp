@@ -51,7 +51,7 @@ and local filters for `airlines` / `exclude_airlines`, `alliances` /
 `exclude_alliances` (Star Alliance / oneworld / SkyTeam), `departure_after` /
 `departure_before`, `arrival_after` / `arrival_before`, `max_duration_minutes`,
 `max_layover_minutes`, `layover_airports` / `exclude_layover_airports` and
-`require_checked_bag`. Every offer carries segments, layovers, emissions
+`require_checked_bag`, `max_price`, `exclude_redeye` and `aircraft_types` / `exclude_aircraft_types`. Every offer carries segments, layovers, emissions
 and a booking token.
 
 - `get_date_grid` prices each date in a window with a live lookup (default 7

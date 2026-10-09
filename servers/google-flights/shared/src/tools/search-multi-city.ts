@@ -89,6 +89,19 @@ export const SearchMultiCitySchema = z.object({
     .array(z.string())
     .optional()
     .describe('Drop itineraries that include a carrier from any of these alliances'),
+  max_price: z.number().positive().optional().describe('Drop offers priced above this amount'),
+  exclude_redeye: z
+    .boolean()
+    .optional()
+    .describe('Drop itineraries that depart between 22:00 and 06:00 local time'),
+  aircraft_types: z
+    .array(z.string())
+    .optional()
+    .describe('Keep only itineraries whose segments are all on one of these aircraft types (substring match)'),
+  exclude_aircraft_types: z
+    .array(z.string())
+    .optional()
+    .describe('Drop itineraries that use any of these aircraft types'),
 });
 
 export function searchMultiCityTool(_server: Server, clientFactory: FlightsClientFactory) {
@@ -105,7 +118,7 @@ Pass the legs in travel order, for example:
     { origin: "ICN", destination: "SFO", date: "2026-11-25" }
   ]
 
-All the usual filters apply to every leg: cabin, passengers, max_stops, airlines / exclude_airlines, alliances / exclude_alliances, time-of-day windows, max_duration_minutes, max_layover_minutes, layover_airports / exclude_layover_airports, require_carry_on / require_checked_bag and emissions.
+All the usual filters apply to every leg: cabin, passengers, max_stops, airlines / exclude_airlines, alliances / exclude_alliances, time-of-day windows, max_duration_minutes, max_layover_minutes, layover_airports / exclude_layover_airports, require_carry_on / require_checked_bag, max_price, exclude_redeye, aircraft_types / exclude_aircraft_types and emissions.
 
 Note: each leg is a separate Google query, so expect roughly one fetch per leg.`,
     inputSchema: {
@@ -198,6 +211,21 @@ Note: each leg is a separate Google query, so expect roughly one fetch per leg.`
           type: 'array',
           items: { type: 'string' },
           description: 'Drop itineraries that include a carrier from any of these alliances',
+        },
+        max_price: { type: 'number', description: 'Drop offers priced above this amount' },
+        exclude_redeye: {
+          type: 'boolean',
+          description: 'Drop itineraries departing 22:00-06:00 local time',
+        },
+        aircraft_types: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Keep only these aircraft types (substring match)',
+        },
+        exclude_aircraft_types: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Drop these aircraft types (substring match)',
         },
       },
       required: ['legs'],
