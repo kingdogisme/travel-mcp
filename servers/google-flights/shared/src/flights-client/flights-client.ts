@@ -2,6 +2,9 @@ import protobuf from 'protobufjs';
 import type {
   FlightOffer,
   FlightSegment,
+  FlightLayover,
+  FlightEmissions,
+  PriceInsights,
   FlightExtensions,
   DateGridEntry,
   DateGridResult,
@@ -12,7 +15,7 @@ import type {
   SeatClass,
   TripType,
 } from './types.js';
-import { logDebug } from '../logging.js';
+import { logDebug, logWarning } from '../logging.js';
 
 // Protobuf enum mappings
 const SEAT_MAP: Record<SeatClass, number> = {
@@ -27,35 +30,137 @@ const TRIP_MAP: Record<TripType, number> = {
   one_way: 2,
 };
 
-// Default headers to mimic a Chrome browser
+// Default headers to mimic a Chrome navigation request. A realistic header set
+// (client hints + fetch metadata) is part of staying under Google's radar.
 const DEFAULT_HEADERS: Record<string, string> = {
   'User-Agent':
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
   Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-  'Accept-Language': 'en-US,en;q=0.5',
+  'Accept-Language': 'en-US,en;q=0.9',
   'Accept-Encoding': 'gzip, deflate, br',
+  'sec-ch-ua': '"Chromium";v="131", "Not_A Brand";v="24", "Google Chrome";v="131"',
+  'sec-ch-ua-mobile': '?0',
+  'sec-ch-ua-platform': '"Windows"',
+  'sec-fetch-dest': 'document',
+  'sec-fetch-mode': 'navigate',
+  'sec-fetch-site': 'none',
+  'sec-fetch-user': '?1',
+  'upgrade-insecure-requests': '1',
   Cookie: 'CONSENT=PENDING+987; SOCS=CAESHAgBEhJnd3NfMjAyMzA4MTAtMF9SQzIaAmRlIAEaBgiAo_CmBg',
 };
 
-// Rate limiting: track last request time
-let lastRequestTime = 0;
+// =============================================================================
+// POLITE FETCHING
+//
+// Google rate-limits and occasionally serves consent/interstitial pages when it
+// sees suspicious traffic. Three things keep us out of trouble:
+//   1. Requests are serialized and spaced with jitter, so bursts never happen.
+//   2. Retryable responses (429/403/5xx) back off exponentially with jitter.
+//   3. Blocked/interstitial pages are detected and retried rather than parsed.
+// =============================================================================
+
 const MIN_REQUEST_INTERVAL_MS = 1500;
+const MAX_JITTER_MS = 900;
+const MAX_ATTEMPTS = 4;
+const BASE_BACKOFF_MS = 3000;
+const MAX_BACKOFF_MS = 30_000;
+
+let lastRequestTime = 0;
+let requestChain: Promise<void> = Promise.resolve();
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+function jitter(max = MAX_JITTER_MS): number {
+  return Math.floor(Math.random() * max);
+}
+
+/** Serialize requests and keep a polite gap (plus jitter) between them. */
+async function acquireSlot(): Promise<void> {
+  const previous = requestChain;
+  let release: () => void = () => {};
+  requestChain = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  await previous;
+  const elapsed = Date.now() - lastRequestTime;
+  const wait = MIN_REQUEST_INTERVAL_MS + jitter() - elapsed;
+  if (wait > 0) await sleep(wait);
+  lastRequestTime = Date.now();
+  release();
+}
+
+/** Detect Google's rate-limit / consent / captcha interstitials. */
+function detectBlock(html: string): string | null {
+  if (html.includes('unusual traffic')) return 'unusual traffic interstitial';
+  if (html.includes("Please show you&#39;re not a robot")) return 'captcha challenge';
+  if (html.includes('sorry/index')) return 'rate-limit redirect';
+  if (html.length < 50_000 && html.includes('consent.google.com')) return 'consent interstitial';
+  return null;
+}
+
+function retryDelay(attempt: number, response?: Response): number {
+  const header = response?.headers?.get('retry-after');
+  const retryAfterMs = header ? Number(header) * 1000 : Number.NaN;
+  const backoff = Number.isFinite(retryAfterMs)
+    ? retryAfterMs
+    : Math.min(BASE_BACKOFF_MS * 2 ** (attempt - 1), MAX_BACKOFF_MS);
+  return backoff + jitter(1500);
+}
 
 async function rateLimitedFetch(url: string): Promise<string> {
-  const now = Date.now();
-  const timeSinceLastRequest = now - lastRequestTime;
-  if (timeSinceLastRequest < MIN_REQUEST_INTERVAL_MS) {
-    await new Promise((resolve) =>
-      setTimeout(resolve, MIN_REQUEST_INTERVAL_MS - timeSinceLastRequest)
-    );
-  }
-  lastRequestTime = Date.now();
+  let lastError = 'unknown error';
 
-  const response = await fetch(url, { headers: DEFAULT_HEADERS });
-  if (!response.ok) {
-    throw new Error(`Google Flights returned HTTP ${response.status}`);
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    await acquireSlot();
+
+    let response: Response;
+    try {
+      response = await fetch(url, { headers: DEFAULT_HEADERS });
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+      if (attempt === MAX_ATTEMPTS) break;
+      logWarning('fetch', `Network error (${lastError}), retrying (${attempt}/${MAX_ATTEMPTS})`);
+      await sleep(retryDelay(attempt));
+      continue;
+    }
+
+    if (response.status === 429 || response.status === 403 || response.status >= 500) {
+      lastError = `HTTP ${response.status}`;
+      if (attempt === MAX_ATTEMPTS) break;
+      const delay = retryDelay(attempt, response);
+      logWarning(
+        'fetch',
+        `Google returned ${response.status}, backing off ${Math.round(delay)}ms (${attempt}/${MAX_ATTEMPTS})`
+      );
+      await sleep(delay);
+      continue;
+    }
+
+    if (!response.ok) {
+      throw new Error(`Google Flights returned HTTP ${response.status}`);
+    }
+
+    const html = await response.text();
+    const block = detectBlock(html);
+    if (block) {
+      lastError = block;
+      if (attempt === MAX_ATTEMPTS) break;
+      const delay = retryDelay(attempt, response);
+      logWarning(
+        'fetch',
+        `Blocked by ${block}, backing off ${Math.round(delay)}ms (${attempt}/${MAX_ATTEMPTS})`
+      );
+      await sleep(delay);
+      continue;
+    }
+
+    return html;
   }
-  return response.text();
+
+  throw new Error(
+    `Google is rate-limiting requests (${lastError}). Please wait a few minutes before trying again.`
+  );
 }
 
 // =============================================================================
@@ -254,6 +359,55 @@ function parseSegment(leg: any[]): FlightSegment | null {
   };
 }
 
+// Layovers live in details[13]: one entry per connection, shaped as
+// [minutes, code, code, null, airport name, city, ...]. Google only populates
+// it for itineraries with at least one stop.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function parseLayovers(details: any): FlightLayover[] {
+  const raw = details?.[13];
+  if (!Array.isArray(raw)) return [];
+
+  const layovers: FlightLayover[] = [];
+  for (const entry of raw) {
+    if (!Array.isArray(entry)) continue;
+    const minutes = entry[0];
+    const airport = entry[1];
+    if (typeof minutes !== 'number' || typeof airport !== 'string') continue;
+    layovers.push({
+      airport,
+      airport_name: typeof entry[4] === 'string' ? entry[4] : null,
+      minutes,
+    });
+  }
+  return layovers;
+}
+
+// Emissions live in details[22], alongside the fare tier:
+//   [_, _, fareTier, deltaPercent, _, _, _, grams, typicalGrams, _, otherTypical, ...]
+// `grams` is this itinerary's CO2e estimate, `typicalGrams` is Google's
+// reference for the route, and `deltaPercent` is the rounded difference
+// (negative = less CO2 than typical). Verified: grams / typicalGrams - 1
+// reproduces deltaPercent across sampled offers.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function parseEmissions(details: any): FlightEmissions | null {
+  const raw = details?.[22];
+  if (!Array.isArray(raw)) return null;
+
+  const grams = raw[7];
+  const typicalGrams = raw[8];
+  const deltaPercent = raw[3];
+  if (typeof grams !== 'number' || typeof typicalGrams !== 'number') return null;
+
+  return {
+    grams,
+    typical_grams: typicalGrams,
+    delta_percent:
+      typeof deltaPercent === 'number'
+        ? deltaPercent
+        : Math.round((grams / typicalGrams - 1) * 100),
+  };
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function parseExtensions(raw: any): FlightExtensions {
   // offer[4][6] contains baggage amenity flags: [carry_on_flag, checked_bag_flag]
@@ -332,6 +486,8 @@ function parseRawOffer(raw: any, currency: string): FlightOffer | null {
     duration_minutes: details[9] || 0,
     stops: segments.length > 0 ? segments.length - 1 : 0,
     segments,
+    layovers: parseLayovers(details),
+    emissions: parseEmissions(details),
     extensions: parseExtensions(raw),
     booking_token: priceData[1] || '',
   };
@@ -404,6 +560,14 @@ function sortOffers(offers: FlightOffer[], sortBy: SearchFlightsOptions['sort_by
     case 'arrival':
       sorted.sort((a, b) => a.arrival.localeCompare(b.arrival));
       break;
+    case 'emissions':
+      sorted.sort((a, b) => {
+        const aGrams = a.emissions?.grams ?? Number.POSITIVE_INFINITY;
+        const bGrams = b.emissions?.grams ?? Number.POSITIVE_INFINITY;
+        if (aGrams !== bGrams) return aGrams - bGrams;
+        return a.price - b.price;
+      });
+      break;
     case 'best':
     default:
       // Google's default ordering: best flights first, then others
@@ -451,6 +615,61 @@ export function isBasicEconomy(offer: FlightOffer): boolean {
 }
 
 // =============================================================================
+// PRICE INSIGHTS
+// =============================================================================
+
+// Google renders its verdict as an icon and a sentence ("Prices are currently
+// low"). The icon name is the most stable signal.
+function parsePriceLevel(html: string): PriceInsights['level'] {
+  // Icon names look like ic_price_typical_dark_32px / ic_price_typical_2_32px.
+  const icon = html.match(/ic_price_(low|typical|high)(?:_[a-z0-9]+)*_32px/);
+  if (icon) return icon[1] as PriceInsights['level'];
+
+  // Fall back to the sentence, ignoring whatever markup wraps the keyword.
+  const stripped = html.replace(/<[^>]*>/g, ' ');
+  const text = stripped.match(/Prices are currently\s+(low|typical|high)\b/i);
+  return text ? (text[1].toLowerCase() as PriceInsights['level']) : null;
+}
+
+// ds1[5][1..5] holds the price-history summary as [null, value] pairs:
+//   [1] current price, [2] baseline price, [3] difference from baseline,
+//   [4] low end of the tracked range, [5] high end of the tracked range.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function parsePriceInsights(ds1: any, html: string): PriceInsights | null {
+  const pick = (index: number): number | null => {
+    const entry = ds1?.[5]?.[index];
+    const value = Array.isArray(entry) ? entry[1] : undefined;
+    return typeof value === 'number' ? value : null;
+  };
+
+  const currentPrice = pick(1);
+  const baseline = pick(2);
+  const difference = pick(3);
+  const rangeLow = pick(4);
+  const rangeHigh = pick(5);
+  const level = parsePriceLevel(html);
+
+  if (
+    currentPrice === null &&
+    baseline === null &&
+    rangeLow === null &&
+    rangeHigh === null &&
+    level === null
+  ) {
+    return null;
+  }
+
+  return {
+    level,
+    current_price: currentPrice,
+    baseline_price: baseline,
+    difference_from_baseline: difference,
+    range_low: rangeLow,
+    range_high: rangeHigh,
+  };
+}
+
+// =============================================================================
 // PUBLIC API
 // =============================================================================
 
@@ -473,17 +692,6 @@ export async function searchFlights(options: SearchFlightsOptions): Promise<Sear
   const url = buildFlightsUrl(tfs, options.currency);
   const html = await rateLimitedFetch(url);
 
-  // Check for hard blocks
-  if (
-    html.includes('unusual traffic') ||
-    html.includes('Please show you&#39;re not a robot') ||
-    html.includes('sorry/index')
-  ) {
-    throw new Error(
-      'Google is rate-limiting requests. Please wait a few minutes before trying again.'
-    );
-  }
-
   const ds1 = extractDs1(html);
   if (!ds1) {
     throw new Error(
@@ -495,6 +703,14 @@ export async function searchFlights(options: SearchFlightsOptions): Promise<Sear
 
   // Apply client-side stop filter (supplements the protobuf filter)
   allOffers = filterByStops(allOffers, options.max_stops);
+
+  // Drop itineraries above the emissions threshold (percent above typical).
+  if (options.max_emissions_percent !== undefined) {
+    const limit = options.max_emissions_percent;
+    allOffers = allOffers.filter(
+      (o) => o.emissions === null || o.emissions.delta_percent <= limit
+    );
+  }
 
   // Filter out basic economy fares. A fare is treated as basic economy only when
   // it is the lowest fare tier AND includes no free checked bag — see isBasicEconomy
@@ -527,6 +743,7 @@ export async function searchFlights(options: SearchFlightsOptions): Promise<Sear
       },
     },
     total_results: totalResults,
+    price_insights: parsePriceInsights(ds1, html),
     showing: {
       offset: options.offset,
       count: paginated.length,

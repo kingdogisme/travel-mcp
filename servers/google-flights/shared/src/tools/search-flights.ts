@@ -38,9 +38,17 @@ export const SearchFlightsSchema = z.object({
     .default('any')
     .describe('Maximum number of stops. "any" for no filter, "nonstop" for direct flights only'),
   sort_by: z
-    .enum(['best', 'price', 'duration', 'departure', 'arrival'])
+    .enum(['best', 'price', 'duration', 'departure', 'arrival', 'emissions'])
     .default('best')
     .describe('Sort order for results'),
+  max_emissions_percent: z
+    .number()
+    .min(-100)
+    .max(500)
+    .optional()
+    .describe(
+      'Keep only itineraries whose CO2e is at most this percent above typical for the route (e.g. 0 = typical or better, -20 = at least 20% below typical)'
+    ),
   max_results: z
     .number()
     .int()
@@ -80,6 +88,11 @@ The fare_brand field indicates the fare tier: "Economy" (basic/lowest tier), "Ec
 By default, basic economy fares (fare_brand "Economy") are excluded from results since they typically have significant restrictions (no carry-on, no seat selection, non-refundable). Set exclude_basic_economy to false to include all fare tiers.
 
 IMPORTANT — Handling large result sets: Popular routes often return 50-150+ flights. If total_results is high, recommend narrowing with filters (max_stops, sort_by, seat_class) rather than paginating through everything. For example, set max_stops to "nonstop" or sort_by to "price" to surface the most relevant options quickly.
+
+Each offer also carries:
+- layovers: [{ airport, airport_name, minutes }] for every connection, so you can judge tight or long layovers.
+- emissions: { grams, typical_grams, delta_percent } — CO2e for the itinerary vs Google's typical figure for the route. Sort by "emissions" or filter with max_emissions_percent to prefer greener options.
+- price_insights (top level): Google's read on whether this route is currently cheap, with the tracked price range (range_low / range_high) and the current price.
 
 Pagination: The response includes has_more (boolean) and next_offset (number or null). To get the next page, call search_flights again with the same parameters but set offset to next_offset. Keep paginating while has_more is true. Each page returns up to max_results flights.
 
@@ -134,8 +147,14 @@ Use get_date_grid to find the cheapest dates before searching.`,
         },
         sort_by: {
           type: 'string',
-          enum: ['best', 'price', 'duration', 'departure', 'arrival'],
-          description: 'Sort order (default: best)',
+          enum: ['best', 'price', 'duration', 'departure', 'arrival', 'emissions'],
+          description:
+            'Sort order (default: best). "emissions" sorts by lowest CO2e first.',
+        },
+        max_emissions_percent: {
+          type: 'number',
+          description:
+            'Keep only itineraries at most this percent above typical CO2e for the route (e.g. 0, -20).',
         },
         max_results: {
           type: 'number',

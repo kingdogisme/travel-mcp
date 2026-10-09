@@ -16,6 +16,34 @@ export interface FlightSegment {
   legroom: string | null;
 }
 
+export interface FlightLayover {
+  airport: string;
+  airport_name: string | null;
+  /** Minutes on the ground at this connection. */
+  minutes: number;
+}
+
+export interface FlightEmissions {
+  /** Estimated CO2e for this itinerary, in grams. */
+  grams: number;
+  /** Google's reference emissions for the same route, in grams. */
+  typical_grams: number;
+  /** Percent difference vs the reference (negative = lower emissions). */
+  delta_percent: number;
+}
+
+export interface PriceInsights {
+  /** Google's verdict for the current price on this route. */
+  level: 'low' | 'typical' | 'high' | null;
+  current_price: number | null;
+  baseline_price: number | null;
+  difference_from_baseline: number | null;
+  /** Low end of the price history Google tracks for this route. */
+  range_low: number | null;
+  /** High end of the price history Google tracks for this route. */
+  range_high: number | null;
+}
+
 export interface FlightExtensions {
   carry_on_included: boolean;
   checked_bags_included: number;
@@ -35,6 +63,8 @@ export interface FlightOffer {
   duration_minutes: number;
   stops: number;
   segments: FlightSegment[];
+  layovers: FlightLayover[];
+  emissions: FlightEmissions | null;
   extensions: FlightExtensions;
   booking_token: string;
 }
@@ -69,11 +99,13 @@ export interface SearchFlightsOptions {
   infants_in_seat: number;
   infants_on_lap: number;
   max_stops: 'any' | 'nonstop' | '1' | '2';
-  sort_by: 'best' | 'price' | 'duration' | 'departure' | 'arrival';
+  sort_by: 'best' | 'price' | 'duration' | 'departure' | 'arrival' | 'emissions';
   max_results: number;
   offset: number;
   currency: string;
   exclude_basic_economy: boolean;
+  /** Keep only itineraries whose emissions are at most this percent above typical. */
+  max_emissions_percent?: number;
 }
 
 export interface SearchFlightsResult {
@@ -92,6 +124,7 @@ export interface SearchFlightsResult {
     };
   };
   total_results: number;
+  price_insights: PriceInsights | null;
   showing: { offset: number; count: number };
   has_more: boolean;
   next_offset: number | null;
