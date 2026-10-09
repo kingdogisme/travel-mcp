@@ -24,7 +24,7 @@ export function findTransferBonusesTool(_server: Server, clientFactory: () => IP
         cabins: {
           type: 'array',
           items: { type: 'string', enum: ['Economy', 'Premium Economy', 'Business', 'First'] },
-          description: 'Cabins to probe (default: ["Business", "Economy"])',
+          description: 'Cabins to probe (default: all cabins)',
         },
         adults: { type: 'number', description: 'Adult passengers (default 1)' },
         children: { type: 'number', description: 'Child passengers (default 0)' },

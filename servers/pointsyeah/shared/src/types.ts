@@ -225,8 +225,8 @@ export const FindTransferBonusesParamsSchema = z.object({
     .describe('Return date in YYYY-MM-DD for a round-trip probe'),
   cabins: z
     .array(z.enum(['Economy', 'Premium Economy', 'Business', 'First']))
-    .default(['Business', 'Economy'])
-    .describe('Cabins to probe. Default: ["Business", "Economy"]'),
+    .default(['Economy', 'Premium Economy', 'Business', 'First'])
+    .describe('Cabins to probe. Default: all cabins, so the widest set of programs is checked'),
   adults: z.number().int().min(1).max(9).default(1).describe('Number of adult passengers'),
   children: z.number().int().min(0).max(9).default(0).describe('Number of child passengers'),
   banks: z.array(z.string()).optional().describe('Restrict the search to these transferable banks'),
