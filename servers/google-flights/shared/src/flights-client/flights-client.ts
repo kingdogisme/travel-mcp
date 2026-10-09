@@ -706,14 +706,18 @@ interface FetchedSearchPage {
   ds1: any;
   html: string;
   url: string;
+  /** False when Google served fares from a different cabin than requested. */
+  cabin_honored: boolean;
 }
 
-/**
- * Build the Google Flights URL for a query, fetch it politely, and parse the
- * embedded result payload. Shared by searchFlights and getDateGrid so both go
- * through the same rate limiter.
- */
-async function fetchSearchPage(options: {
+const CABIN_PHRASE: Record<SeatClass, string> = {
+  economy: 'economy class',
+  premium_economy: 'premium economy class',
+  business: 'business class',
+  first: 'first class',
+};
+
+interface SearchPageOptions {
   origin: string | string[];
   destination: string | string[];
   departure_date: string;
@@ -725,7 +729,66 @@ async function fetchSearchPage(options: {
   infants_in_seat: number;
   infants_on_lap: number;
   currency: string;
-}): Promise<FetchedSearchPage> {
+}
+
+/**
+ * Google quietly ignores the cabin enum inside `tfs`: a business-class `tfs`
+ * still comes back with economy fares. Its natural-language query endpoint does
+ * honour the cabin, so for anything above economy we ask in words instead of
+ * protobuf. (Premium economy is not understood by that endpoint, so it falls
+ * back to `tfs` and is reported as not honoured.)
+ */
+export function buildQueryString(options: SearchPageOptions): string {
+  const origins = parseAirportList(options.origin);
+  const destinations = parseAirportList(options.destination);
+
+  let query = `Flights from ${origins.join(' or ')} to ${destinations.join(' or ')}`;
+  if (options.trip_type === 'round_trip' && options.return_date) {
+    query += ` departing ${options.departure_date} returning ${options.return_date}`;
+  } else {
+    query += ` on ${options.departure_date}`;
+  }
+
+  const travellers = options.adults + options.children;
+  if (travellers > 1) {
+    query += ` for ${travellers} passengers`;
+  }
+
+  query += ` ${CABIN_PHRASE[options.seat_class]}`;
+  return query;
+}
+
+function buildQueryUrl(query: string, currency: string): string {
+  const url = new URL('https://www.google.com/travel/flights');
+  url.searchParams.set('q', query);
+  url.searchParams.set('hl', 'en');
+  url.searchParams.set('curr', currency);
+  return url.toString();
+}
+
+/**
+ * Build the Google Flights URL for a query, fetch it politely, and parse the
+ * embedded result payload. Shared by searchFlights and getDateGrid so both go
+ * through the same rate limiter.
+ */
+async function fetchSearchPage(options: SearchPageOptions): Promise<FetchedSearchPage> {
+  // Cabin-aware path: ask in words when the caller wants more than economy.
+  if (options.seat_class !== 'economy') {
+    const queryUrl = buildQueryUrl(buildQueryString(options), options.currency);
+    const queryHtml = await rateLimitedFetch(queryUrl);
+    const queryDs1 = extractDs1(queryHtml);
+    if (queryDs1) {
+      const probe = parseFlightOffers(queryDs1, options.currency);
+      if (probe.length > 0) {
+        return { ds1: queryDs1, html: queryHtml, url: queryUrl, cabin_honored: true };
+      }
+    }
+    logWarning(
+      'fetch',
+      `Natural-language cabin search returned no fares for ${options.seat_class}; falling back to tfs (cabin may be ignored)`
+    );
+  }
+
   const tfs = await buildTfsParam({
     origin: options.origin,
     destination: options.destination,
@@ -749,7 +812,12 @@ async function fetchSearchPage(options: {
     );
   }
 
-  return { ds1, html, url };
+  return {
+    ds1,
+    html,
+    url,
+    cabin_honored: options.seat_class === 'economy',
+  };
 }
 
 /** Parse the historical low-price series Google embeds (past ~60 days). */
@@ -770,7 +838,7 @@ export function parsePriceHistory(ds1: any): PricePoint[] {
 export async function searchFlights(options: SearchFlightsOptions): Promise<SearchFlightsResult> {
   // Note: max_stops filtering is done client-side after parsing results.
   // Sending maxStops=0 in the protobuf can cause Google to return empty results.
-  const { ds1, html, url } = await fetchSearchPage({
+  const { ds1, html, url, cabin_honored } = await fetchSearchPage({
     origin: options.origin,
     destination: options.destination,
     departure_date: options.departure_date,
@@ -822,6 +890,7 @@ export async function searchFlights(options: SearchFlightsOptions): Promise<Sear
       return_date: options.return_date,
       trip_type: options.trip_type,
       seat_class: options.seat_class,
+      cabin_honored,
       passengers: {
         adults: options.adults,
         children: options.children,
@@ -839,6 +908,11 @@ export async function searchFlights(options: SearchFlightsOptions): Promise<Sear
     has_more: options.offset + paginated.length < totalResults,
     next_offset:
       options.offset + paginated.length < totalResults ? options.offset + paginated.length : null,
+    notes: cabin_honored
+      ? []
+      : [
+          `Google did not apply the ${options.seat_class.replace('_', ' ')} cabin filter for this query, so these fares may be from a lower cabin.`,
+        ],
     flights: paginated,
   };
 }
@@ -887,6 +961,7 @@ export async function getDateGrid(options: GetDateGridOptions): Promise<DateGrid
   let priceHistory: PricePoint[] = [];
   let insights: PriceInsights | null = null;
   let anchorUrl = '';
+  let cabinHonored = options.seat_class === 'economy';
 
   for (const date of dates) {
     const page = await fetchSearchPage({
@@ -905,6 +980,7 @@ export async function getDateGrid(options: GetDateGridOptions): Promise<DateGrid
 
     if (!anchorUrl) {
       anchorUrl = page.url;
+      cabinHonored = page.cabin_honored;
       priceHistory = parsePriceHistory(page.ds1);
       insights = parsePriceInsights(page.ds1, page.html);
     }
@@ -944,6 +1020,12 @@ export async function getDateGrid(options: GetDateGridOptions): Promise<DateGrid
     price_insights: insights,
     search_url: anchorUrl,
     currency: options.currency,
+    cabin_honored: cabinHonored,
+    notes: cabinHonored
+      ? []
+      : [
+          `Google did not apply the ${options.seat_class.replace('_', ' ')} cabin filter for this query, so these fares may be from a lower cabin.`,
+        ],
   };
 }
 

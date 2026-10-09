@@ -102,6 +102,8 @@ Each offer also carries:
 
 Pagination: The response includes has_more (boolean) and next_offset (number or null). To get the next page, call search_flights again with the same parameters but set offset to next_offset. Keep paginating while has_more is true. Each page returns up to max_results flights.
 
+Cabin handling: Google ignores the cabin enum inside its protobuf query, so business and first searches are issued through Google's natural-language endpoint instead — those honour the cabin but return a smaller set of fares. Premium economy is not understood by that endpoint; when that happens the response carries cabin_honored: false plus a note in notes, and the fares may be from a lower cabin.
+
 Multiple airports per leg are supported (e.g. "SFO,OAK,SJC" as origin, "NRT,HND" as destination) — useful for metro areas with several airports.
 
 Use find_airport_code first if you need to look up IATA airport codes.

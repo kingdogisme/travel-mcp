@@ -99,6 +99,9 @@ export interface DateGridResult {
   price_insights: PriceInsights | null;
   search_url: string;
   currency: string;
+  /** False when Google returned fares from a different cabin than requested. */
+  cabin_honored: boolean;
+  notes: string[];
 }
 
 export interface AirportResult {
@@ -140,6 +143,8 @@ export interface SearchFlightsResult {
     return_date?: string;
     trip_type: string;
     seat_class: string;
+    /** False when Google returned fares from a different cabin than requested. */
+    cabin_honored: boolean;
     passengers: {
       adults: number;
       children: number;
@@ -154,6 +159,8 @@ export interface SearchFlightsResult {
   showing: { offset: number; count: number };
   has_more: boolean;
   next_offset: number | null;
+  /** Human-readable caveats about this result set (e.g. cabin not honoured). */
+  notes: string[];
   flights: FlightOffer[];
 }
 
