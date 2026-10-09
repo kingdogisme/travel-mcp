@@ -26,7 +26,7 @@
 <body>
 <main>
   <h1>travel-mcp</h1>
-  <p class="lead">Model Context Protocol endpoints for award flight search (PointsYeah) and cash fares (Google Flights).</p>
+  <p class="lead">Model Context Protocol endpoints for award flight search (PointsYeah), cash fares (Google Flights) and the points-vs-cash comparison.</p>
   <table>
     <thead>
       <tr><th>Endpoint</th><th>Transport</th><th>Tools</th></tr>
@@ -35,12 +35,17 @@
       <tr>
         <td><code>/api/pointsyeah/mcp</code></td>
         <td class="method">POST, streamable HTTP</td>
-        <td>search_flights, get_search_history, set_refresh_token</td>
+        <td data-mcp="/api/pointsyeah/mcp">search_flights, find_cheapest_award_dates, find_transfer_bonuses, explore_award_routes, recommend_award_destinations, get_search_history, manage_price_alerts, set_refresh_token</td>
       </tr>
       <tr>
         <td><code>/api/google-flights/mcp</code></td>
         <td class="method">POST, streamable HTTP</td>
-        <td>search_flights, get_date_grid, find_airport_code</td>
+        <td data-mcp="/api/google-flights/mcp">search_flights, search_multi_city, get_date_grid, get_round_trip_grid, search_anywhere, find_airport_code</td>
+      </tr>
+      <tr>
+        <td><code>/api/trip-compare/mcp</code></td>
+        <td class="method">POST, streamable HTTP</td>
+        <td data-mcp="/api/trip-compare/mcp">compare_points_vs_cash</td>
       </tr>
       <tr>
         <td><code>/api/health</code></td>
@@ -51,5 +56,30 @@
   </table>
   <footer>Status: <a href="/api/health">/api/health</a></footer>
 </main>
+  <script>
+    // Render the live tool list for each endpoint; the static text above is the
+    // fallback when an endpoint cannot be reached.
+    (async () => {
+      for (const cell of document.querySelectorAll('[data-mcp]')) {
+        try {
+          const res = await fetch(cell.dataset.mcp, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+            body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
+          });
+          const text = await res.text();
+          let payload = null;
+          for (const line of text.split('\n')) {
+            if (line.startsWith('data: ')) { try { payload = JSON.parse(line.slice(6)); } catch {} }
+          }
+          if (!payload) payload = JSON.parse(text);
+          const names = payload?.result?.tools?.map((tool) => tool.name);
+          if (Array.isArray(names) && names.length > 0) cell.textContent = names.join(', ');
+        } catch {
+          // keep the static list
+        }
+      }
+    })();
+  </script>
 </body>
 </html>
