@@ -1,0 +1,19 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "npm run build",
+  "installCommand": "npm install --legacy-peer-deps",
+  "functions": {
+    "api/health.ts": {
+      "maxDuration": 30
+    },
+    "api/google-flights/mcp.ts": {
+      "maxDuration": 300,
+      "memory": 1024
+    },
+    "api/pointsyeah/mcp.ts": {
+      "maxDuration": 300,
+      "memory": 2048,
+      "includeFiles": "node_modules/@sparticuz/chromium/bin/**"
+    }
+  }
+}

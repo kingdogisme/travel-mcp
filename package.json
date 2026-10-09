@@ -16,5 +16,9 @@
     "build:google-flights": "npm --prefix servers/google-flights run build",
     "start:pointsyeah": "npm --prefix servers/pointsyeah/local run start",
     "start:google-flights": "npm --prefix servers/google-flights/local run start"
+  },
+  "dependencies": {
+    "@sparticuz/chromium": "^153.0.0",
+    "playwright-core": "^1.64.0"
   }
 }
