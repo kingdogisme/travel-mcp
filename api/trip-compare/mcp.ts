@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import {
   createMCPServer,
+  SeatsAeroClient,
   TripCompareClient,
   setRefreshToken,
   setAuthenticated,
@@ -79,7 +80,9 @@ export default async function handler(req: NodeReq, res: ServerResponse) {
   await registerHandlers(server, () => {
     const flights = new GoogleFlightsClient();
     const pointsYeah = serverlessPointsYeahClient();
-    return new TripCompareClient({ flights, pointsYeah });
+    // Cached second source: one plain HTTPS call, no browser, no login.
+    const secondSource = new SeatsAeroClient();
+    return new TripCompareClient({ flights, pointsYeah, secondSource });
   });
 
   const transport = new StreamableHTTPServerTransport({
