@@ -198,11 +198,16 @@ describe('comparePointsVsCash verdicts', () => {
     expect(result.verdict.recommendation).toBe('cash');
   });
 
-  it('falls back to cash when no award space is returned', async () => {
+  it('reports insufficient_data when the searched sources return no awards', async () => {
     const { client } = makeClient({ awards: null });
     const result = await client.comparePointsVsCash(BASE);
-    expect(result.verdict.recommendation).toBe('cash');
-    expect(result.verdict.reason).toContain('No award space');
+    expect(result.verdict.recommendation).toBe('insufficient_data');
+    expect(result.verdict.award_search_status).toBe('no_awards_returned');
+    expect(result.points.search_status).toBe('no_awards_returned');
+    expect(result.verdict.reason).toContain('not proof none is bookable');
+    expect(result.verdict.reason).toContain('Iberia Club (IB)');
+    expect(result.verdict.reason).toContain('check those directly');
+    expect(result.verdict.reason).not.toContain('No award space was found');
     expect(result.points.options).toHaveLength(0);
   });
 
@@ -212,6 +217,8 @@ describe('comparePointsVsCash verdicts', () => {
     expect(result.verdict.recommendation).toBe('points');
     expect(result.verdict.reason).toContain('No cash fare');
     expect(result.cash.cheapest).toBeNull();
+    // No cash fare means no valuation — never a fabricated cents-per-point.
+    expect(result.points.options[0].cents_per_point).toBeNull();
   });
 
   it('ignores award options that cannot seat the party', async () => {
@@ -219,14 +226,40 @@ describe('comparePointsVsCash verdicts', () => {
     const result = await client.comparePointsVsCash({ ...BASE, adults: 2 });
     expect(result.points.options).toHaveLength(1);
     expect(result.verdict.recommendation).toBe('cash');
-    expect(result.verdict.reason).toContain('No award space');
+    expect(result.verdict.award_search_status).toBe('seats_insufficient');
+    expect(result.verdict.reason).toContain('only offers 1 seat(s) for 2 traveller(s)');
   });
 
-  it('keeps the comparison going when one side errors', async () => {
+  it('keeps the comparison going when the award side errors, and says so', async () => {
     const { client } = makeClient({ awardThrows: true });
     const result = await client.comparePointsVsCash(BASE);
-    expect(result.verdict.recommendation).toBe('cash');
+    expect(result.verdict.recommendation).toBe('insufficient_data');
+    expect(result.verdict.award_search_status).toBe('search_failed');
+    expect(result.points.search_error).toContain('award boom');
+    expect(result.verdict.reason).toContain('did not complete');
     expect(result.cash.cheapest?.price).toBe(2000);
+  });
+});
+
+describe('award coverage reporting', () => {
+  it('lists the programs searched and the known coverage gaps', async () => {
+    const { client } = makeClient({});
+    const result = await client.comparePointsVsCash(BASE);
+    expect(result.points.search_status).toBe('awards_found');
+    expect(result.points.search_error).toBeNull();
+    expect(result.points.programs_searched).toContain('AS');
+    expect(result.points.programs_searched).toContain('AA');
+    expect(result.points.programs_searched).not.toContain('IB');
+    expect(result.points.coverage_gaps.map((gap) => gap.code)).toEqual(['IB', 'BA']);
+    expect(result.points.coverage_last_verified).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it('keeps unsearched programs visible when nothing comes back', async () => {
+    const { client } = makeClient({ awards: null });
+    const result = await client.comparePointsVsCash(BASE);
+    expect(result.points.coverage_gaps.map((gap) => gap.code)).toContain('IB');
+    expect(result.verdict.recommendation).toBe('insufficient_data');
+    expect(result.verdict.best_award_program).toBeNull();
   });
 });
 

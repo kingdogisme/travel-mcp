@@ -7,8 +7,17 @@ export type {
   CompareOptions,
   CompareResult,
   AwardOption,
+  AwardSearchStatus,
   CashOption,
+  CoverageGap,
 } from './types.js';
+export {
+  COVERAGE_LAST_VERIFIED,
+  SEARCHED_PROGRAM_CODES,
+  KNOWN_COVERAGE_GAPS,
+  coverageGaps,
+  describeCoverageGaps,
+} from './coverage.js';
 export { logServerStart, logError, logWarning, logDebug } from './logging.js';
 export {
   setRefreshToken,

@@ -8,7 +8,11 @@ This runs two live searches in one call:
 - Google Flights for the cheapest cash fares in the requested cabin
 - PointsYeah for live award availability across 20+ loyalty programs
 
-It then values each award option in cents per point — (cash fare - award taxes) / miles — and recommends points or cash. Transfer bonuses are detected automatically: each award option is valued with the live bonus PointsYeah reports for that bank-to-program pairing, and the applied bonus is shown on the option (transfer_bonus) and in the verdict. Pass transferBonusPercent to override with a specific bonus, or useTransferBonuses: false to ignore bonuses entirely.
+It then values each award option in cents per point — (cash fare - award taxes) / miles — and recommends points or cash.
+
+The result is explicit about how far the evidence goes: points.search_status says how the live award search ended, points.programs_searched lists the loyalty programs it queried, and points.coverage_gaps names the booking programs it never queried (Iberia Club, British Airways Club). When the searched sources return nothing, or the award search fails, the verdict is insufficient_data rather than a "pay cash" recommendation, because an unsearched program may still have seats.
+
+Transfer bonuses are detected automatically: each award option is valued with the live bonus PointsYeah reports for that bank-to-program pairing, and the applied bonus is shown on the option (transfer_bonus) and in the verdict. Pass transferBonusPercent to override with a specific bonus, or useTransferBonuses: false to ignore bonuses entirely.
 
 Use this when the user asks "should I use points or pay cash?", "is this redemption worth it?", or wants to compare a specific route and date. Expect 30-90 seconds, because the award side drives a real browser.`;
 

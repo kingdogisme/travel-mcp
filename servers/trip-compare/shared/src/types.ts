@@ -108,6 +108,19 @@ export interface AwardOption {
   } | null;
 }
 
+export type AwardSearchStatus =
+  | 'awards_found'
+  | 'seats_insufficient'
+  | 'no_awards_returned'
+  | 'search_failed';
+
+/** A booking program the live sources do not search. */
+export interface CoverageGap {
+  code: string;
+  name: string;
+  note: string;
+}
+
 export interface CompareResult {
   route: {
     origin: string;
@@ -129,12 +142,32 @@ export interface CompareResult {
     /** Programs PointsYeah actually returned (it searches all of them). */
     programs_seen: string[];
     unfiltered_total: number;
+    /**
+     * How the live award search ended. "no_awards_returned" means the sources
+     * searched returned nothing — it is not evidence that no award is bookable.
+     */
+    search_status: AwardSearchStatus;
+    /** Error text when the award search failed outright, else null. */
+    search_error: string | null;
+    /** Program codes the live search actually queried. */
+    programs_searched: string[];
+    /** Booking programs known to sit outside the searched sources. */
+    coverage_gaps: CoverageGap[];
+    /** Date the coverage list was last verified against the live sources. */
+    coverage_last_verified: string;
   };
   verdict: {
-    recommendation: 'points' | 'cash' | 'either';
+    /**
+     * "insufficient_data" is the honest answer when the award side could not be
+     * verified (search failed, or the searched sources returned nothing while
+     * known booking programs were never queried).
+     */
+    recommendation: 'points' | 'cash' | 'either' | 'insufficient_data';
     best_award_program: string | null;
     cents_per_point: number | null;
     reason: string;
+    /** The award-search state this verdict was based on. */
+    award_search_status: AwardSearchStatus;
   };
   transfer_bonus_percent: number | null;
   /** True when bonuses came from the live search rather than a manual override. */

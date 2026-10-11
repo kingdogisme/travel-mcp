@@ -9,7 +9,19 @@ import type {
   FlightRoute,
   FlightSearchResults,
 } from 'pointsyeah-mcp-server-shared';
-import type { AwardOption, CashOption, CompareOptions, CompareResult } from './types.js';
+import type {
+  AwardOption,
+  AwardSearchStatus,
+  CashOption,
+  CompareOptions,
+  CompareResult,
+} from './types.js';
+import {
+  COVERAGE_LAST_VERIFIED,
+  SEARCHED_PROGRAM_CODES,
+  coverageGaps,
+  describeCoverageGaps,
+} from './coverage.js';
 import { logDebug, logWarning } from './logging.js';
 
 const SEAT_CLASS: Record<CompareOptions['cabin'], 'economy' | 'premium_economy' | 'business' | 'first'> = {
@@ -286,6 +298,7 @@ export class TripCompareClient {
 
     // Award side — a live PointsYeah search (browser-backed, slow).
     let pointsResult: FlightSearchResults | null = null;
+    let awardSearchError: string | null = null;
     try {
       pointsResult = await this.deps.pointsYeah.searchFlights({
         departure: options.origin,
@@ -305,10 +318,8 @@ export class TripCompareClient {
         limit: options.pointsLimit,
       });
     } catch (error) {
-      logWarning(
-        'compare',
-        `Award lookup failed: ${error instanceof Error ? error.message : String(error)}`
-      );
+      awardSearchError = error instanceof Error ? error.message : String(error);
+      logWarning('compare', `Award lookup failed: ${awardSearchError}`);
     }
 
     const awardOptions: AwardOption[] = [];
@@ -338,14 +349,45 @@ export class TripCompareClient {
     const best = eligible[0] ?? null;
     const bestValue = best?.cents_per_point_with_bonus ?? best?.cents_per_point ?? null;
 
+    // "Nothing came back" and "nothing is bookable" are different claims. Track
+    // which one the evidence actually supports, so one source's silence never
+    // becomes a "cash is the only option" verdict.
+    let awardSearchStatus: AwardSearchStatus;
+    if (awardSearchError) {
+      awardSearchStatus = 'search_failed';
+    } else if (awardOptions.length === 0) {
+      awardSearchStatus = 'no_awards_returned';
+    } else if (eligible.length === 0) {
+      awardSearchStatus = 'seats_insufficient';
+    } else {
+      awardSearchStatus = 'awards_found';
+    }
+
+    const gaps = coverageGaps();
+    const gapText = describeCoverageGaps(gaps);
+    const cashNote = cashPrice !== null ? ` The cheapest cash fare found was ${cashPrice} USD.` : '';
+
     let recommendation: CompareResult['verdict']['recommendation'];
     let reason: string;
-    if (cashPrice === null && best) {
+    if (awardSearchStatus === 'search_failed') {
+      recommendation = 'insufficient_data';
+      reason =
+        `The live award search did not complete (${awardSearchError}), so no points value could be verified.` +
+        `${cashNote} Treat the award side as "not checked", not as "no award space".`;
+    } else if (cashPrice === null && best) {
       recommendation = 'points';
       reason = 'No cash fare was returned, so the award option is the only way to take this trip.';
-    } else if (!best) {
+    } else if (!best && awardSearchStatus === 'seats_insufficient') {
       recommendation = 'cash';
-      reason = 'No award space was found for this cabin, so paying cash is the only option.';
+      // Every option falls short of the party size, so report the roomiest one.
+      const scarce = awardOptions.reduce((a, b) => (b.seats > a.seats ? b : a));
+      reason =
+        `Award space exists, but the roomiest option (${scarce.program_name}) only offers ${scarce.seats} seat(s) for ${options.adults} traveller(s), so it cannot cover this party.`;
+    } else if (!best) {
+      recommendation = 'insufficient_data';
+      reason =
+        `The sources searched (PointsYeah, ${SEARCHED_PROGRAM_CODES.length} programs) returned no award space for this cabin.` +
+        `${cashNote} That is not proof none is bookable: ${gapText} are not covered by the search — check those directly before treating cash as the only option.`;
     } else if (bestValue !== null && bestValue >= minCpp) {
       recommendation = 'points';
       const bonusNote = best.transfer_bonus
@@ -382,12 +424,18 @@ export class TripCompareClient {
         options: awardOptions,
         programs_seen: programsSeen,
         unfiltered_total: pointsResult?.unfiltered_total ?? 0,
+        search_status: awardSearchStatus,
+        search_error: awardSearchError,
+        programs_searched: [...SEARCHED_PROGRAM_CODES],
+        coverage_gaps: gaps,
+        coverage_last_verified: COVERAGE_LAST_VERIFIED,
       },
       verdict: {
         recommendation,
         best_award_program: best?.program_name ?? null,
         cents_per_point: bestValue,
         reason,
+        award_search_status: awardSearchStatus,
       },
       transfer_bonus_percent: options.transferBonusPercent ?? null,
       auto_transfer_bonuses: !options.transferBonusPercent && options.useTransferBonuses !== false,
