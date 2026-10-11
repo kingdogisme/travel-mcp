@@ -9,6 +9,7 @@ export type {
   AwardOption,
   AwardSearchStatus,
   CashOption,
+  CashSearchStatus,
   CoverageGap,
 } from './types.js';
 export {

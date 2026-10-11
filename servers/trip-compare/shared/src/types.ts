@@ -115,6 +115,8 @@ export type AwardSearchStatus =
   | 'search_failed';
 
 /** A booking program the live sources do not search. */
+export type CashSearchStatus = 'fares_found' | 'no_fares_returned' | 'search_failed';
+
 export interface CoverageGap {
   code: string;
   name: string;
@@ -136,6 +138,10 @@ export interface CompareResult {
     price_insights_level: string | null;
     price_history_low: number | null;
     search_url: string;
+    /** How the cash lookup ended; "no_fares_returned" is not proof no fare exists. */
+    search_status: CashSearchStatus;
+    /** Error text when the cash lookup failed outright, else null. */
+    search_error: string | null;
   };
   points: {
     options: AwardOption[];

@@ -13,6 +13,7 @@ import type {
   AwardOption,
   AwardSearchStatus,
   CashOption,
+  CashSearchStatus,
   CompareOptions,
   CompareResult,
 } from './types.js';
@@ -266,6 +267,7 @@ export class TripCompareClient {
 
     // Cash side — one polite Google Flights request.
     let cashResult: SearchFlightsResult | null = null;
+    let cashSearchError: string | null = null;
     try {
       cashResult = await this.deps.flights.searchFlights({
         origin: options.origin,
@@ -286,15 +288,19 @@ export class TripCompareClient {
         exclude_basic_economy: true,
       });
     } catch (error) {
-      logWarning(
-        'compare',
-        `Cash lookup failed: ${error instanceof Error ? error.message : String(error)}`
-      );
+      cashSearchError = error instanceof Error ? error.message : String(error);
+      logWarning('compare', `Cash lookup failed: ${cashSearchError}`);
     }
 
     const cashOptions = (cashResult?.flights ?? []).map(toCashOption);
     const cheapestCash = cashOptions[0] ?? null;
     const cashPrice = cheapestCash?.price ?? null;
+
+    const cashSearchStatus: CashSearchStatus = cashSearchError
+      ? 'search_failed'
+      : cashOptions.length > 0
+        ? 'fares_found'
+        : 'no_fares_returned';
 
     // Award side — a live PointsYeah search (browser-backed, slow).
     let pointsResult: FlightSearchResults | null = null;
@@ -375,8 +381,13 @@ export class TripCompareClient {
         `The live award search did not complete (${awardSearchError}), so no points value could be verified.` +
         `${cashNote} Treat the award side as "not checked", not as "no award space".`;
     } else if (cashPrice === null && best) {
+      // The award side is verified; the cash side is not. Say which one is
+      // missing instead of calling the award the only way to take the trip.
       recommendation = 'points';
-      reason = 'No cash fare was returned, so the award option is the only way to take this trip.';
+      reason =
+        cashSearchStatus === 'search_failed'
+          ? `The cash fare lookup did not complete (${cashSearchError}), so there is no cash price to compare. The ${best.program_name} award (${best.miles} miles + ${best.tax} ${best.tax_currency}) is verified; treat the cash side as "not checked".`
+          : `The cash lookup returned no fares for this date. The ${best.program_name} award (${best.miles} miles + ${best.tax} ${best.tax_currency}) is verified, but that is not proof no cash fare exists — re-check other dates or sources before assuming points is the only way.`;
     } else if (!best && awardSearchStatus === 'seats_insufficient') {
       recommendation = 'cash';
       // Every option falls short of the party size, so report the roomiest one.
@@ -419,6 +430,8 @@ export class TripCompareClient {
         price_insights_level: cashResult?.price_insights?.level ?? null,
         price_history_low: cashResult?.price_insights?.range_low ?? null,
         search_url: cashResult?.search_url ?? '',
+        search_status: cashSearchStatus,
+        search_error: cashSearchError,
       },
       points: {
         options: awardOptions,

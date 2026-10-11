@@ -180,6 +180,8 @@ describe('comparePointsVsCash verdicts', () => {
     expect(result.verdict.best_award_program).toBe('Flying Blue');
     expect(result.verdict.reason).toContain('Flying Blue');
     expect(result.cash.cheapest?.price).toBe(2000);
+    expect(result.cash.search_status).toBe('fares_found');
+    expect(result.cash.search_error).toBeNull();
     expect(result.cash.price_insights_level).toBe('typical');
     expect(result.cash.price_history_low).toBe(1800);
   });
@@ -211,14 +213,25 @@ describe('comparePointsVsCash verdicts', () => {
     expect(result.points.options).toHaveLength(0);
   });
 
-  it('falls back to points when no cash fare is returned', async () => {
+  it('keeps the award when no cash fare comes back, without claiming cash is impossible', async () => {
     const { client } = makeClient({ cash: null });
     const result = await client.comparePointsVsCash(BASE);
     expect(result.verdict.recommendation).toBe('points');
-    expect(result.verdict.reason).toContain('No cash fare');
+    expect(result.cash.search_status).toBe('no_fares_returned');
+    expect(result.cash.search_error).toBeNull();
+    expect(result.verdict.reason).toContain('not proof no cash fare exists');
     expect(result.cash.cheapest).toBeNull();
     // No cash fare means no valuation — never a fabricated cents-per-point.
     expect(result.points.options[0].cents_per_point).toBeNull();
+  });
+
+  it('flags a failed cash lookup as unverified rather than free', async () => {
+    const { client } = makeClient({ cashThrows: true });
+    const result = await client.comparePointsVsCash(BASE);
+    expect(result.cash.search_status).toBe('search_failed');
+    expect(result.cash.search_error).toContain('cash boom');
+    expect(result.verdict.recommendation).toBe('points');
+    expect(result.verdict.reason).toContain('not checked');
   });
 
   it('ignores award options that cannot seat the party', async () => {
