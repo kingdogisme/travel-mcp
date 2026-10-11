@@ -8,6 +8,7 @@ import type {
   FlightSearchResults,
   CheapestAwardDatesResult,
 } from 'pointsyeah-mcp-server-shared';
+import type { SeatsAeroOption } from '../shared/src/seats-aero.js';
 
 const CASH_OFFER: FlightOffer = {
   price: 2000,
@@ -115,6 +116,66 @@ interface Calls {
   awardDates: string[];
   awardTripTypes: string[];
   gridCalls: number;
+  secondSourceCalls: number;
+}
+
+/** A program that prices several distinct itineraries. */
+function awardResultWithRoutes(routeCount: number): FlightSearchResults {
+  const routes = Array.from({ length: routeCount }, (_, index) => ({
+    payment: {
+      currency: 'USD',
+      tax: 100 + index,
+      miles: 70000 + index * 5000,
+      cabin: 'Business',
+      unit: 'miles',
+      seats: 2,
+      cash_price: 2000,
+    },
+    segments: [
+      {
+        duration: 600,
+        flight_number: `AF${80 + index}`,
+        dt: `2026-11-18T1${index}:00:00`,
+        da: 'SFO',
+        at: '2026-11-19T15:00:00',
+        aa: 'LHR',
+        cabin: 'Business',
+      },
+    ],
+    transfer: [{ bank: 'Amex', actual_points: 70000, points: 70000, code: 'Amex' }],
+  }));
+  const result: FlightResult = {
+    program: 'Flying Blue',
+    code: 'flyingblue',
+    date: '2026-11-18',
+    departure: 'SFO',
+    arrival: 'LHR',
+    routes,
+  };
+  return { total: routeCount, unfiltered_total: routeCount, results: [result], notes: [] };
+}
+
+function seatsAeroOptions(count = 2): SeatsAeroOption[] {
+  return Array.from({ length: count }, (_, index) => ({
+    flight_ref: `ref-${index}`,
+    origin: 'SFO',
+    destination: 'LHR',
+    cabin: 'business',
+    departs_at: '2026-11-18 18:15',
+    arrives_at: '2026-11-19 14:25',
+    stops: 0,
+    flight_numbers: `IB35${index}`,
+    miles: 22000 + index * 1000,
+    program_id: 'american',
+    program_code: 'AA',
+    program_name: 'American Airlines AAdvantage',
+    operating_carriers: ['IB'],
+    tax: 100.7,
+    tax_currency: 'USD',
+    duration_minutes: 670,
+    seats: index === 0 ? 2 : null,
+    data_age_minutes: 1593,
+  }));
 }
 
 function makeClient(config: {
@@ -124,13 +185,30 @@ function makeClient(config: {
   awardCheapest?: CheapestAwardDatesResult['cheapest'];
   cashThrows?: boolean;
   awardThrows?: boolean;
+  routesPerProgram?: number;
+  carrier?: string;
+  secondSource?: SeatsAeroOption[] | 'throws';
 }) {
-  const calls: Calls = { cashDates: [], awardDates: [], awardTripTypes: [], gridCalls: 0 };
+  const calls: Calls = {
+    cashDates: [],
+    awardDates: [],
+    awardTripTypes: [],
+    gridCalls: 0,
+    secondSourceCalls: 0,
+  };
   const flights = {
     async searchFlights(options: { departure_date: string }) {
       calls.cashDates.push(options.departure_date);
       if (config.cashThrows) throw new Error('cash boom');
-      return config.cash === null ? ({ ...cashResult(), flights: [] } as SearchFlightsResult) : config.cash ?? cashResult();
+      if (config.cash === null) return { ...cashResult(), flights: [] } as SearchFlightsResult;
+      const base = config.cash ?? cashResult();
+      if (config.carrier) {
+        return {
+          ...base,
+          flights: base.flights.map((offer) => ({ ...offer, airline_code: config.carrier })),
+        } as SearchFlightsResult;
+      }
+      return base;
     },
     async getDateGrid() {
       calls.gridCalls += 1;
@@ -142,7 +220,11 @@ function makeClient(config: {
       calls.awardDates.push(options.departDate);
       calls.awardTripTypes.push(options.tripType);
       if (config.awardThrows) throw new Error('award boom');
-      return config.awards === null ? ({ total: 0, unfiltered_total: 0, results: [], notes: [] } as FlightSearchResults) : config.awards ?? awardResult();
+      if (config.awards === null) {
+        return { total: 0, unfiltered_total: 0, results: [], notes: [] } as FlightSearchResults;
+      }
+      if (config.awards) return config.awards;
+      return config.routesPerProgram ? awardResultWithRoutes(config.routesPerProgram) : awardResult();
     },
     async findCheapestAwardDates() {
       return {
@@ -157,7 +239,22 @@ function makeClient(config: {
       } as CheapestAwardDatesResult;
     },
   } as unknown as IPointsYeahClient;
-  return { client: new TripCompareClient({ flights, pointsYeah }), calls };
+
+  const secondSource =
+    config.secondSource === undefined
+      ? undefined
+      : {
+          async searchFlights() {
+            calls.secondSourceCalls += 1;
+            if (config.secondSource === 'throws') throw new Error('seats boom');
+            return config.secondSource as SeatsAeroOption[];
+          },
+        };
+
+  return {
+    client: new TripCompareClient({ flights, pointsYeah, ...(secondSource ? { secondSource } : {}) }),
+    calls,
+  };
 }
 
 const BASE: CompareOptions = {
@@ -273,6 +370,96 @@ describe('award coverage reporting', () => {
     expect(result.points.coverage_gaps.map((gap) => gap.code)).toContain('IB');
     expect(result.verdict.recommendation).toBe('insufficient_data');
     expect(result.verdict.best_award_program).toBeNull();
+  });
+});
+
+describe('multiple itineraries per program', () => {
+  it('keeps up to three routes per program instead of only the cheapest', async () => {
+    const { client } = makeClient({ routesPerProgram: 5 });
+    const result = await client.comparePointsVsCash(BASE);
+    const miles = result.points.options.map((option) => option.miles).sort((a, b) => a - b);
+    expect(miles).toEqual([70000, 75000, 80000]);
+    expect(result.points.options.every((option) => option.program === 'flyingblue')).toBe(true);
+  });
+
+  it('keeps distinct itineraries under the same program', async () => {
+    const { client } = makeClient({ routesPerProgram: 2 });
+    const result = await client.comparePointsVsCash(BASE);
+    expect(result.points.options).toHaveLength(2);
+    expect(new Set(result.points.options.map((option) => option.itinerary)).size).toBe(2);
+  });
+});
+
+describe('carrier coverage gaps', () => {
+  it('flags the operating carrier whose own program is not searched', async () => {
+    const { client } = makeClient({ carrier: 'IB' });
+    const result = await client.comparePointsVsCash(BASE);
+    const gap = result.points.coverage_gaps.find((entry) => entry.carrier === 'IB');
+    expect(gap).toBeDefined();
+    expect(gap?.source).toBe('operating_carrier');
+    expect(gap?.code).toBe('IB');
+    expect(gap?.official_search_url).toContain('iberia.com');
+    expect(gap?.note).toContain('Iberia');
+    expect(result.points.verification_links.length).toBeGreaterThan(0);
+  });
+
+  it('reports only the static program list for a searched carrier', async () => {
+    const { client } = makeClient({ carrier: 'UA' });
+    const result = await client.comparePointsVsCash(BASE);
+    expect(result.points.coverage_gaps.every((entry) => entry.source === 'program_list')).toBe(true);
+    expect(result.points.coverage_gaps.map((entry) => entry.code)).toEqual(['IB', 'BA']);
+  });
+});
+
+describe('cached second source', () => {
+  it('fills a coverage gap with cached options that do not drive the verdict', async () => {
+    const { client, calls } = makeClient({ awards: null, carrier: 'IB', secondSource: seatsAeroOptions(2) });
+    const result = await client.comparePointsVsCash(BASE);
+
+    expect(calls.secondSourceCalls).toBe(1);
+    expect(result.second_source?.status).toBe('ok');
+    expect(result.second_source?.options_found).toBe(2);
+
+    const cached = result.points.options.filter((option) => option.verification === 'cached');
+    expect(cached).toHaveLength(2);
+    expect(cached[0].source).toBe('seats.aero');
+    expect(cached[0].data_age_minutes).toBe(1593);
+
+    // Cached leads never become a valuation.
+    expect(result.verdict.recommendation).toBe('insufficient_data');
+    expect(result.verdict.best_award_program).toBeNull();
+    expect(result.verdict.reason).toContain('Seats.aero');
+  });
+
+  it('never lets cached options into the valuation even when cash is priced', async () => {
+    const { client } = makeClient({ awards: null, carrier: 'IB', secondSource: seatsAeroOptions(1) });
+    const result = await client.comparePointsVsCash(BASE);
+    expect(result.cash.cheapest?.price).toBe(2000);
+    expect(result.verdict.recommendation).toBe('insufficient_data');
+    expect(result.verdict.cents_per_point).toBeNull();
+  });
+
+  it('skips the lookup when the caller opts out', async () => {
+    const { client, calls } = makeClient({ awards: null, carrier: 'IB', secondSource: seatsAeroOptions(2) });
+    const result = await client.comparePointsVsCash({ ...BASE, useSecondSource: false });
+    expect(calls.secondSourceCalls).toBe(0);
+    expect(result.second_source?.status).toBe('skipped');
+    expect(result.points.options).toHaveLength(0);
+  });
+
+  it('skips the lookup when the live search already covers the route', async () => {
+    const { client, calls } = makeClient({ carrier: 'UA', secondSource: seatsAeroOptions(2) });
+    const result = await client.comparePointsVsCash(BASE);
+    expect(calls.secondSourceCalls).toBe(0);
+    expect(result.second_source?.status).toBe('skipped');
+  });
+
+  it('survives a failing second source', async () => {
+    const { client } = makeClient({ awards: null, carrier: 'IB', secondSource: 'throws' });
+    const result = await client.comparePointsVsCash(BASE);
+    expect(result.second_source?.status).toBe('error');
+    expect(result.second_source?.error).toContain('seats boom');
+    expect(result.verdict.recommendation).toBe('insufficient_data');
   });
 });
 

@@ -10,11 +10,36 @@ about and free to evolve independently.
 | --- | --- | --- | --- |
 | [pointsyeah](./servers/pointsyeah) | `pointsyeah-mcp-server` | `search_flights`, `find_cheapest_award_dates`, `find_transfer_bonuses`, `explore_award_routes`, `recommend_award_destinations`, `get_search_history`, `manage_price_alerts`, `set_refresh_token` | PointsYeah Cognito refresh token (`POINTSYEAH_REFRESH_TOKEN`) |
 | [google-flights](./servers/google-flights) | `google-flights-mcp-server` | `search_flights`, `search_multi_city`, `get_date_grid`, `get_round_trip_grid`, `search_anywhere`, `find_airport_code` | None |
-| [trip-compare](./servers/trip-compare) | `trip-compare-mcp-server` | `compare_points_vs_cash` | PointsYeah token (for the award half) |
+| [trip-compare](./servers/trip-compare) | `trip-compare-mcp-server` | `compare_points_vs_cash` | PointsYeah token (for the award half); no auth for the cached Seats.aero second source |
 
 - **pointsyeah** — award (points/miles) flight search across 20+ loyalty programs, with bank transfer options, flexible-date award pricing, and a live transfer-bonus finder.
 - **google-flights** — cash-price flight search, date-price grids, airport IATA lookup, plus airline / time-of-day / duration / layover filters and cabin-aware pricing.
 - **trip-compare** — runs a cash search and an award search for the same trip, values each award in cents per point (auto-detecting live transfer bonuses), and recommends points or cash. Pass `departDateTo` for a flexible departure window: it finds the cheapest cash day and the cheapest award day in the window, then compares on the cheapest cash day.
+
+  It is also explicit about how far the evidence goes, because a single source's
+  silence is not proof that no award exists:
+
+  - `points.search_status` records how the live search ended —
+    `awards_found`, `seats_insufficient`, `seats_unverified`,
+    `no_awards_returned` or `search_failed` — and `points.search_error` carries
+    the failure text. `cash.search_status` does the same for the cash lookup.
+  - `points.programs_searched` lists the 21 loyalty programs actually queried.
+    `points.coverage_gaps` lists the programs that were never queried, including
+    the ones that can book the airlines flying this specific trip (an
+    Iberia-operated flight surfaces `Iberia Club (IB)` and
+    `British Airways Club (BA)`), with `points.verification_links` for checking
+    them by hand. `points.coverage_last_verified` dates the list.
+  - An unverified award side yields the `insufficient_data` verdict instead of a
+    "pay cash" recommendation, and award space that cannot seat the party is
+    reported as such rather than as "no award space".
+  - Every program can price several itineraries, so up to three routes per
+    program are kept instead of only the cheapest one.
+  - When there is a gap to fill, one call goes to the cached Seats.aero public
+    MCP (`second_source`). Those options are marked `source: "seats.aero"` /
+    `verification: "cached"` with `data_age_minutes`, and they never drive the
+    cents-per-point valuation — they are leads to verify. Set
+    `useSecondSource: false` to skip the lookup, or `TRIP_COMPARE_SECOND_SOURCE=off`
+    to disable it deployment-wide.
 
 Together they cover both sides of the same question: "what does this trip cost
 in points vs. in cash?"

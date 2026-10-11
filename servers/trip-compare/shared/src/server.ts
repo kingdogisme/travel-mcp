@@ -6,6 +6,7 @@ import type { IPointsYeahClient } from 'pointsyeah-mcp-server-shared';
 import { registerResources } from './resources.js';
 import { createRegisterTools } from './tools.js';
 import { TripCompareClient } from './compare.js';
+import { SeatsAeroClient } from './seats-aero.js';
 
 export interface ITripCompareClient {
   comparePointsVsCash(options: import('./types.js').CompareOptions): Promise<import('./types.js').CompareResult>;
@@ -41,6 +42,7 @@ export function createMCPServer(options: CreateMCPServerOptions) {
         new TripCompareClient({
           flights: new GoogleFlightsClient() as IFlightsClient,
           pointsYeah: defaultPointsYeahClientFactory() as IPointsYeahClient,
+          secondSource: new SeatsAeroClient(),
         }));
 
     registerResources(server, options.version);

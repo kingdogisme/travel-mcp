@@ -8,17 +8,23 @@ export type {
   CompareResult,
   AwardOption,
   AwardSearchStatus,
+  AwardSource,
+  AwardVerification,
   CashOption,
   CashSearchStatus,
+  SecondSourceStatus,
   CoverageGap,
 } from './types.js';
 export {
   COVERAGE_LAST_VERIFIED,
   SEARCHED_PROGRAM_CODES,
-  KNOWN_COVERAGE_GAPS,
-  coverageGaps,
+  VERIFICATION_LINKS,
+  staticCoverageGaps,
+  coverageGapsForCarriers,
+  mergeCoverageGaps,
   describeCoverageGaps,
 } from './coverage.js';
+export { SeatsAeroClient, type ISeatsAeroClient, type SeatsAeroOption } from './seats-aero.js';
 export { logServerStart, logError, logWarning, logDebug } from './logging.js';
 export {
   setRefreshToken,

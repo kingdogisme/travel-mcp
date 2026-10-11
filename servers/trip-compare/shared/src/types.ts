@@ -63,6 +63,12 @@ export const CompareOptionsSchema = z.object({
     .max(20)
     .default(5)
     .describe('How many cash fares to include (default 5)'),
+  useSecondSource: z
+    .boolean()
+    .default(true)
+    .describe(
+      'When true (default) and the live search leaves a coverage gap, consult the cached Seats.aero second source once. Set false to skip it.'
+    ),
 });
 
 export type CompareOptions = z.infer<typeof CompareOptionsSchema>;
@@ -88,7 +94,8 @@ export interface AwardOption {
   tax: number;
   tax_currency: string;
   cabin: string;
-  seats: number;
+  /** Null when the source did not report a seat count. */
+  seats: number | null;
   stops: number;
   duration_minutes: number;
   itinerary: string;
@@ -106,22 +113,36 @@ export interface AwardOption {
     end_date: string | null;
     slogan: string;
   } | null;
+  /** Which source produced this option. */
+  source: AwardSource;
+  /** Whether the price came from a live search or a cached observation. */
+  verification: AwardVerification;
+  /** Age of the underlying observation in minutes (cached sources only). */
+  data_age_minutes: number | null;
+  /** Airlines actually flying the itinerary, when the source reports them. */
+  operating_carriers: string[];
 }
 
 export type AwardSearchStatus =
   | 'awards_found'
   | 'seats_insufficient'
+  /** Award options came back but none reported a seat count. */
+  | 'seats_unverified'
   | 'no_awards_returned'
   | 'search_failed';
 
-/** A booking program the live sources do not search. */
 export type CashSearchStatus = 'fares_found' | 'no_fares_returned' | 'search_failed';
 
-export interface CoverageGap {
-  code: string;
-  name: string;
-  note: string;
-}
+export type AwardSource = 'pointsyeah' | 'seats.aero';
+
+/** How an award price was verified: a live search, or a cached observation. */
+export type AwardVerification = 'live-search' | 'cached';
+
+export type SecondSourceStatus = 'skipped' | 'ok' | 'no_results' | 'error';
+
+import type { CoverageGap, VerificationLink } from './coverage.js';
+
+export type { CoverageGap, VerificationLink } from './coverage.js';
 
 export interface CompareResult {
   route: {
@@ -159,6 +180,8 @@ export interface CompareResult {
     programs_searched: string[];
     /** Booking programs known to sit outside the searched sources. */
     coverage_gaps: CoverageGap[];
+    /** Manual verification entry points for those gaps. */
+    verification_links: VerificationLink[];
     /** Date the coverage list was last verified against the live sources. */
     coverage_last_verified: string;
   };
@@ -175,6 +198,17 @@ export interface CompareResult {
     /** The award-search state this verdict was based on. */
     award_search_status: AwardSearchStatus;
   };
+  /**
+   * The cached second source (Seats.aero), consulted only when the primary
+   * search leaves a gap worth filling. Null when it was never queried.
+   */
+  second_source: {
+    name: string;
+    status: SecondSourceStatus;
+    error: string | null;
+    options_found: number;
+    note: string;
+  } | null;
   transfer_bonus_percent: number | null;
   /** True when bonuses came from the live search rather than a manual override. */
   auto_transfer_bonuses: boolean;

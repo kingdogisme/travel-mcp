@@ -32,6 +32,7 @@ export function registerResources(server: Server, version: string) {
                 notes: [
                   'Combines a live PointsYeah award search with a Google Flights cash search.',
                   'Award results are scoped to the programs PointsYeah searches; unsearched programs (Iberia Club, British Airways Club) are reported as coverage gaps rather than as "no award space".',
+                  'A coverage gap triggers one cached lookup against Seats.aero; those options are marked cached and never drive the valuation.',
                   'Award searches launch a real browser, so expect 30-90 seconds per comparison.',
                 ],
               },

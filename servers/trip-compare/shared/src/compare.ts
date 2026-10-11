@@ -20,9 +20,13 @@ import type {
 import {
   COVERAGE_LAST_VERIFIED,
   SEARCHED_PROGRAM_CODES,
-  coverageGaps,
+  VERIFICATION_LINKS,
+  coverageGapsForCarriers,
   describeCoverageGaps,
+  mergeCoverageGaps,
+  staticCoverageGaps,
 } from './coverage.js';
+import type { ISeatsAeroClient, SeatsAeroOption } from './seats-aero.js';
 import { logDebug, logWarning } from './logging.js';
 
 const SEAT_CLASS: Record<CompareOptions['cabin'], 'economy' | 'premium_economy' | 'business' | 'first'> = {
@@ -34,6 +38,13 @@ const SEAT_CLASS: Record<CompareOptions['cabin'], 'economy' | 'premium_economy' 
 
 /** Anything at or above this is generally considered a good use of points. */
 const DEFAULT_MIN_CENTS_PER_POINT = 1.5;
+
+/** Best value first; options with no valuation sink to the bottom. */
+function byAwardValue(a: AwardOption, b: AwardOption): number {
+  const aValue = a.cents_per_point_with_bonus ?? a.cents_per_point ?? -1;
+  const bValue = b.cents_per_point_with_bonus ?? b.cents_per_point ?? -1;
+  return bValue - aValue;
+}
 
 function toCashOption(offer: FlightOffer): CashOption {
   return {
@@ -73,14 +84,95 @@ function routeDurationMinutes(route: FlightRoute): number {
   return Math.round((end - start) / 60000);
 }
 
-function bestRoute(result: FlightResult): FlightRoute | null {
-  const routes = result.routes ?? [];
-  if (routes.length === 0) return null;
-  return routes.reduce((cheapest, route) => {
-    const a = cheapest.payment?.miles ?? Number.POSITIVE_INFINITY;
-    const b = route.payment?.miles ?? Number.POSITIVE_INFINITY;
-    return b < a ? route : cheapest;
-  });
+/**
+ * Every program can price several distinct itineraries. Keeping only the
+ * cheapest one hid the other candidates — a different connecting city, or the
+ * same flight under a different operating carrier — so keep the cheapest few
+ * per program and let the caller see them all.
+ */
+function routesForResult(result: FlightResult): FlightRoute[] {
+  const priced = (result.routes ?? []).filter((route) => route.payment);
+  if (priced.length === 0) return [];
+  const byMiles = [...priced].sort(
+    (a, b) => (a.payment?.miles ?? Number.POSITIVE_INFINITY) - (b.payment?.miles ?? Number.POSITIVE_INFINITY)
+  );
+
+  const seen = new Set<string>();
+  const kept: FlightRoute[] = [];
+  for (const route of byMiles) {
+    const key = `${route.payment?.miles}|${route.payment?.tax}|${itinerarySummary(route)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    kept.push(route);
+    if (kept.length >= MAX_ROUTES_PER_PROGRAM) break;
+  }
+  return kept;
+}
+
+/** "IB352" -> "IB"; the operating carrier of a segment. */
+export function carrierFromFlightNumber(flightNumber: string | undefined): string | null {
+  const match = (flightNumber ?? '').trim().toUpperCase().match(/^([A-Z0-9]{2})\d/);
+  return match ? match[1] : null;
+}
+
+function addDays(date: string, days: number): string {
+  const parsed = new Date(`${date}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return date;
+  parsed.setUTCDate(parsed.getUTCDate() + days);
+  return parsed.toISOString().slice(0, 10);
+}
+
+function daysFromToday(date: string): number {
+  const parsed = new Date(`${date}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return 0;
+  const today = new Date();
+  const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  return Math.round((parsed.getTime() - todayUtc) / 86_400_000);
+}
+
+/** Split a comma-separated airport list into codes, capped for politeness. */
+export function splitAirports(value: string, limit = 3): string[] {
+  return value
+    .split(',')
+    .map((code) => code.trim().toUpperCase())
+    .filter((code) => code.length > 0)
+    .slice(0, limit);
+}
+
+/**
+ * Cached options are leads, not quotes: they never drive the valuation, and the
+ * caller sees the age of the observation instead of a live price.
+ */
+function toSecondSourceOption(
+  option: SeatsAeroOption,
+  cabin: CompareOptions['cabin'],
+  cashPrice: number | null
+): AwardOption {
+  const tax = option.tax ?? 0;
+  return {
+    program: option.program_code,
+    program_name: `${option.program_name} (cached)`,
+    miles: option.miles,
+    tax,
+    tax_currency: option.tax_currency,
+    cabin,
+    seats: option.seats,
+    stops: option.stops,
+    duration_minutes: option.duration_minutes ?? 0,
+    itinerary: [option.flight_numbers, option.departs_at, '->', option.arrives_at]
+      .filter(Boolean)
+      .join(' ')
+      .trim(),
+    transfer_from: [],
+    cents_per_point: centsPerPoint(cashPrice, option.miles, tax),
+    cents_per_point_with_bonus: null,
+    effective_miles: null,
+    transfer_bonus: null,
+    source: 'seats.aero',
+    verification: 'cached',
+    data_age_minutes: option.data_age_minutes,
+    operating_carriers: option.operating_carriers,
+  };
 }
 
 /**
@@ -102,7 +194,8 @@ function toAwardOption(
   route: FlightRoute,
   cashPrice: number | null,
   manualBonusPercent: number | null,
-  useBonuses: boolean
+  useBonuses: boolean,
+  operatingCarriers: string[]
 ): AwardOption | null {
   const payment = route.payment;
   if (!payment) return null;
@@ -152,13 +245,28 @@ function toAwardOption(
       : null,
     effective_miles: bonusPercent ? effectiveMiles : null,
     transfer_bonus: bonusApplied,
+    source: 'pointsyeah',
+    verification: 'live-search',
+    data_age_minutes: null,
+    operating_carriers: operatingCarriers,
   };
 }
 
 export interface TripCompareClientDeps {
   flights: IFlightsClient;
   pointsYeah: IPointsYeahClient;
+  /** Cached second source (Seats.aero); optional so tests can omit it. */
+  secondSource?: ISeatsAeroClient;
 }
+
+/** How many routes to keep per loyalty program, instead of only the cheapest. */
+const MAX_ROUTES_PER_PROGRAM = 3;
+
+/** Days after the comparison date that the cached second source is searched. */
+const SECOND_SOURCE_WINDOW_DAYS = 3;
+
+/** Anonymous Seats.aero access only covers departures within ~60 days. */
+const SECOND_SOURCE_MAX_DAYS_OUT = 59;
 
 export class TripCompareClient {
   constructor(private deps: TripCompareClientDeps) {}
@@ -254,6 +362,106 @@ export class TripCompareClient {
     };
   }
 
+  /**
+   * Consult the cached second source, once, and only when the live search left
+   * a gap worth filling. Its options are marked as cached and never drive the
+   * valuation.
+   */
+  private async checkSecondSource(args: {
+    options: CompareOptions;
+    seatClass: 'economy' | 'premium_economy' | 'business' | 'first';
+    compareDate: string;
+    gapDetected: boolean;
+    cashPrice: number | null;
+    existing: AwardOption[];
+  }): Promise<{ info: NonNullable<CompareResult['second_source']>; options: AwardOption[] }> {
+    const name = 'seats.aero';
+    const skipped = (note: string) => ({
+      info: { name, status: 'skipped' as const, error: null, options_found: 0, note },
+      options: [] as AwardOption[],
+    });
+
+    if (args.options.useSecondSource === false || process.env.TRIP_COMPARE_SECOND_SOURCE === 'off') {
+      return skipped('Second source disabled for this call.');
+    }
+    if (!this.deps.secondSource) {
+      return skipped('Second source not configured.');
+    }
+    if (!args.gapDetected) {
+      return skipped('The live search already covers this route, so the cached second source was not queried.');
+    }
+
+    const daysOut = daysFromToday(args.compareDate);
+    if (daysOut < 0 || daysOut > SECOND_SOURCE_MAX_DAYS_OUT) {
+      return skipped(
+        `Anonymous access only covers departures up to ${SECOND_SOURCE_MAX_DAYS_OUT} days out; ${args.compareDate} is outside that window.`
+      );
+    }
+
+    try {
+      const found = await this.deps.secondSource.searchFlights({
+        origins: splitAirports(args.options.origin),
+        destinations: splitAirports(args.options.destination),
+        startDate: args.compareDate,
+        endDate: addDays(args.compareDate, SECOND_SOURCE_WINDOW_DAYS),
+        cabin: args.seatClass,
+        maxResults: 20,
+      });
+
+      const seen = new Set(args.existing.map((option) => `${option.program}|${option.itinerary}`));
+      const options: AwardOption[] = [];
+      for (const option of found) {
+        if (options.length >= 8) break;
+        const mapped = toSecondSourceOption(option, args.options.cabin, args.cashPrice);
+        const key = `${mapped.program}|${mapped.itinerary}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        options.push(mapped);
+      }
+      options.sort(byAwardValue);
+
+      if (options.length === 0) {
+        return {
+          info: {
+            name,
+            status: 'no_results',
+            error: null,
+            options_found: 0,
+            note: 'Seats.aero had no cached observations for this route and window.',
+          },
+          options,
+        };
+      }
+
+      const withSeats = options.filter((option) => option.seats !== null).length;
+      return {
+        info: {
+          name,
+          status: 'ok',
+          error: null,
+          options_found: options.length,
+          note:
+            `Cached Seats.aero observations, not live quotes: ${options.length} option(s) from other programs` +
+            `${withSeats > 0 ? ` (${withSeats} with a reported seat count)` : ''}. Verify before booking.`,
+        },
+        options,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logWarning('compare', `Second source failed: ${message}`);
+      return {
+        info: {
+          name,
+          status: 'error',
+          error: message,
+          options_found: 0,
+          note: 'The cached second source could not be reached; the live comparison is unaffected.',
+        },
+        options: [],
+      };
+    }
+  }
+
   async comparePointsVsCash(options: CompareOptions): Promise<CompareResult> {
     const seatClass = SEAT_CLASS[options.cabin];
     const roundTrip = Boolean(options.returnDate);
@@ -330,30 +538,45 @@ export class TripCompareClient {
 
     const awardOptions: AwardOption[] = [];
     const programsSeen: string[] = [];
+    const operatingCarriers = new Set<string>();
     for (const result of pointsResult?.results ?? []) {
       programsSeen.push(result.code);
-      const route = bestRoute(result);
-      if (!route) continue;
-      const option = toAwardOption(
-        result,
-        route,
-        cashPrice,
-        options.transferBonusPercent ?? null,
-        options.useTransferBonuses !== false
-      );
-      if (option) awardOptions.push(option);
+      for (const route of routesForResult(result)) {
+        const carriers = (route.segments ?? [])
+          .map((segment) => carrierFromFlightNumber(segment.flight_number))
+          .filter((code): code is string => code !== null);
+        for (const carrier of carriers) operatingCarriers.add(carrier);
+
+        const option = toAwardOption(
+          result,
+          route,
+          cashPrice,
+          options.transferBonusPercent ?? null,
+          options.useTransferBonuses !== false,
+          carriers
+        );
+        if (option) awardOptions.push(option);
+      }
     }
 
-    awardOptions.sort((a, b) => {
-      const aValue = a.cents_per_point_with_bonus ?? a.cents_per_point ?? -1;
-      const bValue = b.cents_per_point_with_bonus ?? b.cents_per_point ?? -1;
-      return bValue - aValue;
-    });
+    // The cash side names the airline directly; use it for the coverage check.
+    for (const offer of cashResult?.flights ?? []) {
+      const code = (offer as { airline_code?: string }).airline_code;
+      if (code) operatingCarriers.add(code.toUpperCase());
+    }
+
+    awardOptions.sort(byAwardValue);
 
     const minCpp = options.minCentsPerPoint ?? DEFAULT_MIN_CENTS_PER_POINT;
-    const eligible = awardOptions.filter((option) => option.seats >= options.adults);
+    // Only a live award search may drive the valuation: cached observations are
+    // leads to verify, and an unreported seat count cannot cover a party.
+    const liveOptions = awardOptions.filter((option) => option.verification === 'live-search');
+    const eligible = liveOptions.filter(
+      (option) => option.seats !== null && option.seats >= options.adults
+    );
     const best = eligible[0] ?? null;
     const bestValue = best?.cents_per_point_with_bonus ?? best?.cents_per_point ?? null;
+    const seatsKnown = liveOptions.some((option) => option.seats !== null);
 
     // "Nothing came back" and "nothing is bookable" are different claims. Track
     // which one the evidence actually supports, so one source's silence never
@@ -361,17 +584,40 @@ export class TripCompareClient {
     let awardSearchStatus: AwardSearchStatus;
     if (awardSearchError) {
       awardSearchStatus = 'search_failed';
-    } else if (awardOptions.length === 0) {
+    } else if (liveOptions.length === 0) {
       awardSearchStatus = 'no_awards_returned';
     } else if (eligible.length === 0) {
-      awardSearchStatus = 'seats_insufficient';
+      awardSearchStatus = seatsKnown ? 'seats_insufficient' : 'seats_unverified';
     } else {
       awardSearchStatus = 'awards_found';
     }
 
-    const gaps = coverageGaps();
+    // Coverage check: which programs could hold this trip's award space that
+    // the search never queried. The static list is always relevant; the carrier
+    // entries are what make it actionable for a specific route.
+    const carrierGaps = coverageGapsForCarriers([...operatingCarriers]);
+    const gaps = mergeCoverageGaps(carrierGaps, staticCoverageGaps());
     const gapText = describeCoverageGaps(gaps);
     const cashNote = cashPrice !== null ? ` The cheapest cash fare found was ${cashPrice} USD.` : '';
+
+    // Second source: only when there is a gap worth filling, and only one call.
+    const secondSource = await this.checkSecondSource({
+      options,
+      seatClass,
+      compareDate,
+      gapDetected: awardSearchStatus !== 'awards_found' || carrierGaps.length > 0,
+      cashPrice,
+      existing: awardOptions,
+    });
+    const secondSourceInfo = secondSource.info;
+    if (secondSource.options.length > 0) {
+      awardOptions.push(...secondSource.options);
+      awardOptions.sort(byAwardValue);
+    }
+    const secondSourceNote =
+      secondSourceInfo.status === 'ok'
+        ? ` The cached second source (Seats.aero) also lists ${secondSourceInfo.options_found} option(s) from other programs — verify before booking.`
+        : '';
 
     let recommendation: CompareResult['verdict']['recommendation'];
     let reason: string;
@@ -391,14 +637,20 @@ export class TripCompareClient {
     } else if (!best && awardSearchStatus === 'seats_insufficient') {
       recommendation = 'cash';
       // Every option falls short of the party size, so report the roomiest one.
-      const scarce = awardOptions.reduce((a, b) => (b.seats > a.seats ? b : a));
+      const scarce = awardOptions.reduce((a, b) => ((b.seats ?? -1) > (a.seats ?? -1) ? b : a));
       reason =
         `Award space exists, but the roomiest option (${scarce.program_name}) only offers ${scarce.seats} seat(s) for ${options.adults} traveller(s), so it cannot cover this party.`;
+    } else if (!best && awardSearchStatus === 'seats_unverified') {
+      recommendation = 'insufficient_data';
+      const unverified = liveOptions[0];
+      reason =
+        `Award options came back (cheapest ${unverified.miles} miles on ${unverified.program_name}), but none reported a seat count, so ${options.adults} seat(s) could not be confirmed.` +
+        `${cashNote} Verify seat availability before treating this as bookable.`;
     } else if (!best) {
       recommendation = 'insufficient_data';
       reason =
         `The sources searched (PointsYeah, ${SEARCHED_PROGRAM_CODES.length} programs) returned no award space for this cabin.` +
-        `${cashNote} That is not proof none is bookable: ${gapText} are not covered by the search — check those directly before treating cash as the only option.`;
+        `${cashNote}${secondSourceNote} That is not proof none is bookable: ${gapText} are not covered by the search — check those directly before treating cash as the only option.`;
     } else if (bestValue !== null && bestValue >= minCpp) {
       recommendation = 'points';
       const bonusNote = best.transfer_bonus
@@ -441,6 +693,7 @@ export class TripCompareClient {
         search_error: awardSearchError,
         programs_searched: [...SEARCHED_PROGRAM_CODES],
         coverage_gaps: gaps,
+        verification_links: gaps.length > 0 ? [...VERIFICATION_LINKS] : [],
         coverage_last_verified: COVERAGE_LAST_VERIFIED,
       },
       verdict: {
@@ -450,6 +703,7 @@ export class TripCompareClient {
         reason,
         award_search_status: awardSearchStatus,
       },
+      second_source: secondSourceInfo,
       transfer_bonus_percent: options.transferBonusPercent ?? null,
       auto_transfer_bonuses: !options.transferBonusPercent && options.useTransferBonuses !== false,
       window: windowInfo,

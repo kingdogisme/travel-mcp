@@ -10,7 +10,11 @@ This runs two live searches in one call:
 
 It then values each award option in cents per point — (cash fare - award taxes) / miles — and recommends points or cash.
 
-The result is explicit about how far the evidence goes: points.search_status says how the live award search ended, points.programs_searched lists the loyalty programs it queried, and points.coverage_gaps names the booking programs it never queried (Iberia Club, British Airways Club). When the searched sources return nothing, or the award search fails, the verdict is insufficient_data rather than a "pay cash" recommendation, because an unsearched program may still have seats.
+The result is explicit about how far the evidence goes: points.search_status says how the live award search ended, points.programs_searched lists the loyalty programs it queried, and points.coverage_gaps names the booking programs it never queried — including the programs that can book the airlines actually flying this trip, with points.verification_links for checking them by hand. When the searched sources return nothing, or the award search fails, the verdict is insufficient_data rather than a "pay cash" recommendation, because an unsearched program may still have seats.
+
+Each award option carries its provenance: source and verification say whether the price came from the live search or from the cached Seats.aero second source, and data_age_minutes says how old a cached observation is. When the live search leaves a gap, the tool consults the cached second source once (second_source reports what happened); those options are leads to verify and never drive the cents-per-point valuation. Set useSecondSource: false to skip that lookup.
+
+Every program can price several itineraries, so up to three routes per program are kept instead of only the cheapest one.
 
 Transfer bonuses are detected automatically: each award option is valued with the live bonus PointsYeah reports for that bank-to-program pairing, and the applied bonus is shown on the option (transfer_bonus) and in the verdict. Pass transferBonusPercent to override with a specific bonus, or useTransferBonuses: false to ignore bonuses entirely.
 
@@ -60,6 +64,11 @@ export function comparePointsVsCashTool(_server: Server, clientFactory: TripComp
         },
         pointsLimit: { type: 'number', description: 'How many award options to include (default 8)' },
         cashLimit: { type: 'number', description: 'How many cash fares to include (default 5)' },
+        useSecondSource: {
+          type: 'boolean',
+          description:
+            'Consult the cached Seats.aero second source when the live search leaves a coverage gap (default true)',
+        },
       },
       required: ['origin', 'destination', 'departDate'],
     },
