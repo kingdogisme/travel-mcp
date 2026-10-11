@@ -41,6 +41,13 @@ about and free to evolve independently.
     `useSecondSource: false` to skip the lookup, or `TRIP_COMPARE_SECOND_SOURCE=off`
     to disable it deployment-wide.
 
+  The order is search, then coverage check, then gap fill: the live search runs
+  first, the carrier table decides whether anything important went unqueried,
+  and only then does the cached source get its single call. A browser adapter
+  that queries Iberia Club / British Airways Club directly is deliberately
+  deferred until those lookups prove frequent and a free, stable interface
+  exists; `points.verification_links` is the manual path until then.
+
 Together they cover both sides of the same question: "what does this trip cost
 in points vs. in cash?"
 

@@ -402,6 +402,69 @@ describe('multiple itineraries per program', () => {
   });
 });
 
+/** The same Iberia-operated flight priced by three different programs. */
+function sameFlightThreePrograms(): FlightSearchResults {
+  const programs = [
+    { code: 'aa', program: 'American Airlines AAdvantage', miles: 22500, tax: 100.7 },
+    { code: 'as', program: 'Alaska Atmos Rewards', miles: 35000, tax: 25.6 },
+    { code: 'ib', program: 'Iberia Club', miles: 32000, tax: 88.4 },
+  ];
+  const results: FlightResult[] = programs.map((entry) => ({
+    program: entry.program,
+    code: entry.code,
+    date: '2026-11-18',
+    departure: 'LAX',
+    arrival: 'MAD',
+    routes: [
+      {
+        payment: {
+          currency: 'USD',
+          tax: entry.tax,
+          miles: entry.miles,
+          cabin: 'Economy',
+          unit: 'miles',
+          seats: 2,
+          cash_price: 900,
+        },
+        segments: [
+          {
+            duration: 670,
+            flight_number: 'IB352',
+            dt: '2026-11-18T18:15:00',
+            da: 'LAX',
+            at: '2026-11-19T14:25:00',
+            aa: 'MAD',
+            cabin: 'Economy',
+          },
+        ],
+        transfer: [{ bank: 'Amex', actual_points: entry.miles, points: entry.miles, code: 'Amex' }],
+      },
+    ],
+  }));
+  return { total: 3, unfiltered_total: 3, results, notes: [] };
+}
+
+describe('acceptance: programs on the same flight', () => {
+  it('keeps every program that prices the same operating flight', async () => {
+    const { client } = makeClient({ awards: sameFlightThreePrograms() });
+    const result = await client.comparePointsVsCash({ ...BASE, cabin: 'Economy' });
+    const byProgram = new Map(result.points.options.map((option) => [option.program, option]));
+    expect([...byProgram.keys()].sort()).toEqual(['aa', 'as', 'ib']);
+    expect(byProgram.get('aa')?.miles).toBe(22500);
+    expect(byProgram.get('as')?.miles).toBe(35000);
+    expect(byProgram.get('ib')?.miles).toBe(32000);
+    expect(byProgram.get('ib')?.operating_carriers).toContain('IB');
+  });
+
+  it('counts Alaska as supported when it returns live award space', async () => {
+    const { client } = makeClient({ awards: sameFlightThreePrograms() });
+    const result = await client.comparePointsVsCash({ ...BASE, cabin: 'Economy' });
+    expect(result.points.programs_seen).toContain('as');
+    expect(result.points.programs_searched).toContain('AS');
+    expect(result.points.options.some((option) => option.program === 'as')).toBe(true);
+  });
+});
+
 describe('carrier coverage gaps', () => {
   it('flags the operating carrier whose own program is not searched', async () => {
     const { client } = makeClient({ carrier: 'IB' });
