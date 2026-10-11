@@ -117,7 +117,17 @@ interface Calls {
   awardTripTypes: string[];
   gridCalls: number;
   secondSourceCalls: number;
+  secondSourceParams: Array<{ startDate: string; endDate: string; origins: string[] }>;
 }
+
+/** Dates relative to today, because the second source enforces a live window. */
+function isoPlus(days: number): string {
+  const now = new Date();
+  const date = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + days));
+  return date.toISOString().slice(0, 10);
+}
+
+const SOON = isoPlus(30);
 
 /** A program that prices several distinct itineraries. */
 function awardResultWithRoutes(routeCount: number): FlightSearchResults {
@@ -195,6 +205,7 @@ function makeClient(config: {
     awardTripTypes: [],
     gridCalls: 0,
     secondSourceCalls: 0,
+    secondSourceParams: [],
   };
   const flights = {
     async searchFlights(options: { departure_date: string }) {
@@ -244,8 +255,9 @@ function makeClient(config: {
     config.secondSource === undefined
       ? undefined
       : {
-          async searchFlights() {
+          async searchFlights(params: { startDate: string; endDate: string; origins: string[] }) {
             calls.secondSourceCalls += 1;
+            calls.secondSourceParams.push(params);
             if (config.secondSource === 'throws') throw new Error('seats boom');
             return config.secondSource as SeatsAeroOption[];
           },
@@ -414,7 +426,7 @@ describe('carrier coverage gaps', () => {
 describe('cached second source', () => {
   it('fills a coverage gap with cached options that do not drive the verdict', async () => {
     const { client, calls } = makeClient({ awards: null, carrier: 'IB', secondSource: seatsAeroOptions(2) });
-    const result = await client.comparePointsVsCash(BASE);
+    const result = await client.comparePointsVsCash({ ...BASE, departDate: SOON });
 
     expect(calls.secondSourceCalls).toBe(1);
     expect(result.second_source?.status).toBe('ok');
@@ -433,7 +445,7 @@ describe('cached second source', () => {
 
   it('never lets cached options into the valuation even when cash is priced', async () => {
     const { client } = makeClient({ awards: null, carrier: 'IB', secondSource: seatsAeroOptions(1) });
-    const result = await client.comparePointsVsCash(BASE);
+    const result = await client.comparePointsVsCash({ ...BASE, departDate: SOON });
     expect(result.cash.cheapest?.price).toBe(2000);
     expect(result.verdict.recommendation).toBe('insufficient_data');
     expect(result.verdict.cents_per_point).toBeNull();
@@ -441,7 +453,7 @@ describe('cached second source', () => {
 
   it('skips the lookup when the caller opts out', async () => {
     const { client, calls } = makeClient({ awards: null, carrier: 'IB', secondSource: seatsAeroOptions(2) });
-    const result = await client.comparePointsVsCash({ ...BASE, useSecondSource: false });
+    const result = await client.comparePointsVsCash({ ...BASE, departDate: SOON, useSecondSource: false });
     expect(calls.secondSourceCalls).toBe(0);
     expect(result.second_source?.status).toBe('skipped');
     expect(result.points.options).toHaveLength(0);
@@ -456,10 +468,27 @@ describe('cached second source', () => {
 
   it('survives a failing second source', async () => {
     const { client } = makeClient({ awards: null, carrier: 'IB', secondSource: 'throws' });
-    const result = await client.comparePointsVsCash(BASE);
+    const result = await client.comparePointsVsCash({ ...BASE, departDate: SOON });
     expect(result.second_source?.status).toBe('error');
     expect(result.second_source?.error).toContain('seats boom');
     expect(result.verdict.recommendation).toBe('insufficient_data');
+  });
+
+  it('keeps the query window inside the anonymous date range', async () => {
+    const { client, calls } = makeClient({ awards: null, carrier: 'IB', secondSource: seatsAeroOptions(1) });
+    const lastDay = isoPlus(60);
+    await client.comparePointsVsCash({ ...BASE, departDate: lastDay });
+    expect(calls.secondSourceCalls).toBe(1);
+    expect(calls.secondSourceParams[0].startDate).toBe(lastDay);
+    expect(calls.secondSourceParams[0].endDate).toBe(lastDay);
+  });
+
+  it('skips the lookup when the date is outside the anonymous range', async () => {
+    const { client, calls } = makeClient({ awards: null, carrier: 'IB', secondSource: seatsAeroOptions(1) });
+    const result = await client.comparePointsVsCash({ ...BASE, departDate: isoPlus(120) });
+    expect(calls.secondSourceCalls).toBe(0);
+    expect(result.second_source?.status).toBe('skipped');
+    expect(result.second_source?.note).toContain('60 days out');
   });
 });
 

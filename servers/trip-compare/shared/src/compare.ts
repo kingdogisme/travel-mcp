@@ -122,12 +122,18 @@ function addDays(date: string, days: number): string {
   return parsed.toISOString().slice(0, 10);
 }
 
+function todayUtc(): string {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+    .toISOString()
+    .slice(0, 10);
+}
+
 function daysFromToday(date: string): number {
   const parsed = new Date(`${date}T00:00:00Z`);
   if (Number.isNaN(parsed.getTime())) return 0;
-  const today = new Date();
-  const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
-  return Math.round((parsed.getTime() - todayUtc) / 86_400_000);
+  const today = new Date(`${todayUtc()}T00:00:00Z`);
+  return Math.round((parsed.getTime() - today.getTime()) / 86_400_000);
 }
 
 /** Split a comma-separated airport list into codes, capped for politeness. */
@@ -265,8 +271,8 @@ const MAX_ROUTES_PER_PROGRAM = 3;
 /** Days after the comparison date that the cached second source is searched. */
 const SECOND_SOURCE_WINDOW_DAYS = 3;
 
-/** Anonymous Seats.aero access only covers departures within ~60 days. */
-const SECOND_SOURCE_MAX_DAYS_OUT = 59;
+/** Anonymous Seats.aero access covers today through 60 days out, inclusive. */
+const SECOND_SOURCE_MAX_DAYS_OUT = 60;
 
 export class TripCompareClient {
   constructor(private deps: TripCompareClientDeps) {}
@@ -394,16 +400,21 @@ export class TripCompareClient {
     const daysOut = daysFromToday(args.compareDate);
     if (daysOut < 0 || daysOut > SECOND_SOURCE_MAX_DAYS_OUT) {
       return skipped(
-        `Anonymous access only covers departures up to ${SECOND_SOURCE_MAX_DAYS_OUT} days out; ${args.compareDate} is outside that window.`
+        `Anonymous access only covers departures from today through ${SECOND_SOURCE_MAX_DAYS_OUT} days out; ${args.compareDate} is outside that window.`
       );
     }
+
+    // The end of the window has to stay inside the anonymous range too.
+    const windowEnd = addDays(args.compareDate, SECOND_SOURCE_WINDOW_DAYS);
+    const maxDate = addDays(todayUtc(), SECOND_SOURCE_MAX_DAYS_OUT);
+    const endDate = windowEnd > maxDate ? maxDate : windowEnd;
 
     try {
       const found = await this.deps.secondSource.searchFlights({
         origins: splitAirports(args.options.origin),
         destinations: splitAirports(args.options.destination),
         startDate: args.compareDate,
-        endDate: addDays(args.compareDate, SECOND_SOURCE_WINDOW_DAYS),
+        endDate,
         cabin: args.seatClass,
         maxResults: 20,
       });
