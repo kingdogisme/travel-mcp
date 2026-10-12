@@ -272,6 +272,8 @@ export interface SearchFlightsResult {
   next_offset: number | null;
   /** Human-readable caveats about this result set (e.g. cabin not honoured). */
   notes: string[];
+  /** Lowest priced option across ALL filtered offers, before sorting and pagination. */
+  cheapest_offer?: FlightOffer | null;
   flights: FlightOffer[];
 }
 
@@ -339,9 +341,9 @@ export type TripType = 'one_way' | 'round_trip';
 // =============================================================================
 // MULTI-CITY SEARCH
 //
-// Google Flights prices a multi-city trip leg by leg rather than returning a
-// single combined itinerary, so we search each leg as its own one-way trip and
-// report the options per leg plus the sum of the cheapest fares.
+// This integration currently searches independent one-way flights for each leg.
+// Google Flights itself supports separately priced multi-city / open-jaw tickets,
+// but this scraper does NOT fetch a joint-ticket quote.
 // =============================================================================
 
 export interface MultiCityLeg {
@@ -353,22 +355,42 @@ export interface MultiCityLeg {
 
 export interface MultiCityLegResult {
   leg: MultiCityLeg;
+  /** The status of this leg's independent one-way search. */
+  status: 'ok' | 'no_results' | 'failed' | 'unpriced';
   total_results: number;
-  search_url: string;
-  cabin_honored: boolean;
+  search_url: string | null;
+  cabin_honored: boolean | null;
   options: FlightOffer[];
+  /** Minimum across all filtered offers, even when not among displayed options. */
+  lowest_price: number | null;
   notes: string[];
+  error?: string;
 }
 
 export interface MultiCityResult {
+  /** Not a jointly priced multi-city ticket. */
+  pricing_mode: 'separate_one_ways';
+  joint_ticket_quote: null;
+  /** Google displayed fare; this parser cannot establish whether it is per passenger or per party. */
+  price_basis: 'google_displayed_fare_unverified';
+  passengers: {
+    adults: number;
+    children: number;
+    infants_in_seat: number;
+    infants_on_lap: number;
+  };
+  /** Partial whenever at least one leg could not produce a usable priced result. */
+  coverage_status: 'complete' | 'partial';
   legs: MultiCityLegResult[];
-  /** Sum of the cheapest fare on each leg, when every leg returned a fare. */
+  /** Legacy field: sum of the lowest displayed one-way fares, NOT a joint-ticket or party quote. */
   cheapest_total: {
     currency: string;
     total: number;
-    /** Cheapest fare for each leg, in leg order. */
     per_leg: number[];
     airlines: string[];
+    quote_kind: 'separate_one_way_displayed_fare_sum';
+    /** Deliberately null until passenger/party fare basis is independently verified. */
+    party_total: null;
   } | null;
   notes: string[];
 }
