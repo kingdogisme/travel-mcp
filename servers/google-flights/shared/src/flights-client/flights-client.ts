@@ -1105,6 +1105,14 @@ export async function resolveAirportInput(value: string | string[]): Promise<str
   return codes.slice(0, 4).join(',');
 }
 
+/** Pick the lowest price before applying any presentation sort or result limit. */
+export function lowestPricedOffer(offers: FlightOffer[]): FlightOffer | null {
+  return offers.reduce<FlightOffer | null>(
+    (best, offer) => best === null || offer.price < best.price ? offer : best,
+    null
+  );
+}
+
 export async function searchFlights(options: SearchFlightsOptions): Promise<SearchFlightsResult> {
   // Note: max_stops filtering is done client-side after parsing results.
   // Sending maxStops=0 in the protobuf can cause Google to return empty results.
@@ -1191,17 +1199,23 @@ export async function searchFlights(options: SearchFlightsOptions): Promise<Sear
       : [
           `Google did not apply the ${options.seat_class.replace('_', ' ')} cabin filter for this query, so these fares may be from a lower cabin.`,
         ],
+    cheapest_offer: lowestPricedOffer(allOffers),
     flights: paginated,
   };
 }
 
 /**
- * Search a multi-city trip. Google prices these leg by leg rather than as one
- * combined itinerary, so we run each leg as its own one-way search (reusing the
- * same polite fetch path and filters) and report the options per leg, plus the
- * sum of each leg's cheapest fare.
+ * Collect independent one-way fares for a multi-city route. Google Flights has
+ * a separate joint multi-city quotation flow which this scraper does not fetch.
+ * Keep error/no-result status per leg, and never fabricate a joint or party quote.
+ *
+ * The optional searcher is solely for deterministic tests; production uses
+ * searchFlights and its full-result cheapest_offer.
  */
-export async function searchMultiCity(options: SearchMultiCityOptions): Promise<MultiCityResult> {
+export async function searchMultiCity(
+  options: SearchMultiCityOptions,
+  searcher: (options: SearchFlightsOptions) => Promise<SearchFlightsResult> = searchFlights
+): Promise<MultiCityResult> {
   if (!Array.isArray(options.legs) || options.legs.length < 2) {
     throw new Error('A multi-city trip needs at least two legs');
   }
@@ -1211,82 +1225,132 @@ export async function searchMultiCity(options: SearchMultiCityOptions): Promise<
 
   const legs: MultiCityLegResult[] = [];
   for (const leg of options.legs) {
-    const origin = String(await resolveAirportInput(leg.origin));
-    const destination = String(await resolveAirportInput(leg.destination));
-    const resolvedLeg = { ...leg, origin, destination };
-    const result = await searchFlights({
-      origin,
-      destination,
-      departure_date: leg.date,
-      trip_type: 'one_way',
-      seat_class: options.seat_class,
+    let resolvedLeg: MultiCityLeg = { ...leg };
+    try {
+      const origin = String(await resolveAirportInput(leg.origin));
+      const destination = String(await resolveAirportInput(leg.destination));
+      resolvedLeg = { ...leg, origin, destination };
+      const result = await searcher({
+        origin,
+        destination,
+        departure_date: leg.date,
+        trip_type: 'one_way',
+        seat_class: options.seat_class,
+        adults: options.adults,
+        children: options.children,
+        infants_in_seat: options.infants_in_seat,
+        infants_on_lap: options.infants_on_lap,
+        max_stops: options.max_stops,
+        sort_by: options.sort_by,
+        max_results: options.max_results,
+        offset: 0,
+        currency: options.currency,
+        exclude_basic_economy: options.exclude_basic_economy,
+        max_emissions_percent: options.max_emissions_percent,
+        airlines: options.airlines,
+        exclude_airlines: options.exclude_airlines,
+        departure_after: options.departure_after,
+        departure_before: options.departure_before,
+        arrival_after: options.arrival_after,
+        arrival_before: options.arrival_before,
+        max_duration_minutes: options.max_duration_minutes,
+        max_layover_minutes: options.max_layover_minutes,
+        require_carry_on: options.require_carry_on,
+        require_checked_bag: options.require_checked_bag,
+        layover_airports: options.layover_airports,
+        exclude_layover_airports: options.exclude_layover_airports,
+        alliances: options.alliances,
+        exclude_alliances: options.exclude_alliances,
+        max_price: options.max_price,
+        exclude_redeye: options.exclude_redeye,
+        aircraft_types: options.aircraft_types,
+        exclude_aircraft_types: options.exclude_aircraft_types,
+      });
+
+      const lowest = result.cheapest_offer;
+      const lowestPrice =
+        lowest && Number.isFinite(lowest.price) && lowest.price >= 0 ? lowest.price : null;
+      const status: MultiCityLegResult['status'] =
+        result.total_results === 0 ? 'no_results' : lowestPrice === null ? 'unpriced' : 'ok';
+      const notes = [...result.notes];
+      if (status === 'no_results') {
+        notes.push('No priced options returned by this search. This does not prove tickets are unavailable.');
+      } else if (status === 'unpriced') {
+        notes.push('No reliable full-result minimum available; a displayed or truncated list is not a price floor.');
+      }
+
+      legs.push({
+        leg: resolvedLeg,
+        status,
+        total_results: result.total_results,
+        search_url: result.search_url,
+        cabin_honored: result.query.cabin_honored,
+        options: result.flights,
+        lowest_price: lowestPrice,
+        notes,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      legs.push({
+        leg: resolvedLeg,
+        status: 'failed',
+        total_results: 0,
+        search_url: null,
+        cabin_honored: null,
+        options: [],
+        lowest_price: null,
+        notes: ['This leg failed to search. Do not interpret this as no fares available.'],
+        error: message,
+      });
+    }
+  }
+
+  const coverage_status: MultiCityResult['coverage_status'] =
+    legs.every((leg) => leg.status === 'ok') ? 'complete' : 'partial';
+  const lowestPerLeg = legs.map((leg) => leg.lowest_price);
+  let cheapestTotal: MultiCityResult['cheapest_total'] = null;
+  if (
+    coverage_status === 'complete' &&
+    lowestPerLeg.every((price) => typeof price === 'number' && Number.isFinite(price))
+  ) {
+    cheapestTotal = {
+      currency: options.currency,
+      total: (lowestPerLeg as number[]).reduce((sum, price) => sum + price, 0),
+      per_leg: lowestPerLeg as number[],
+      airlines: legs.map((leg) => {
+        // Full-result cheapest may fall outside the top displayed options.
+        const visible = leg.options.find((offer) => offer.price === leg.lowest_price);
+        return visible?.airline ?? '';
+      }),
+      quote_kind: 'separate_one_way_displayed_fare_sum',
+      party_total: null,
+    };
+  }
+
+  const notes = [
+    'This is a sum of INDEPENDENT ONE-WAY Google displayed fares, not an actual combined multi-city/open-jaw ticket quotation.',
+    'Passenger price basis is unverified; do not multiply, divide or present the sum as a verified full-party booking price.',
+    'Each leg must be verified at checkout for its own fare and availability; a joint-ticket quote requires a separate booking flow.',
+  ];
+  if (coverage_status === 'partial') {
+    notes.push('Some legs failed, returned no results, or lacked a trustworthy minimum. No complete split-ticket estimate is available.');
+  }
+
+  return {
+    pricing_mode: 'separate_one_ways',
+    joint_ticket_quote: null,
+    price_basis: 'google_displayed_fare_unverified',
+    passengers: {
       adults: options.adults,
       children: options.children,
       infants_in_seat: options.infants_in_seat,
       infants_on_lap: options.infants_on_lap,
-      max_stops: options.max_stops,
-      sort_by: options.sort_by,
-      max_results: options.max_results,
-      offset: 0,
-      currency: options.currency,
-      exclude_basic_economy: options.exclude_basic_economy,
-      max_emissions_percent: options.max_emissions_percent,
-      airlines: options.airlines,
-      exclude_airlines: options.exclude_airlines,
-      departure_after: options.departure_after,
-      departure_before: options.departure_before,
-      arrival_after: options.arrival_after,
-      arrival_before: options.arrival_before,
-      max_duration_minutes: options.max_duration_minutes,
-      max_layover_minutes: options.max_layover_minutes,
-      require_carry_on: options.require_carry_on,
-      require_checked_bag: options.require_checked_bag,
-      layover_airports: options.layover_airports,
-      exclude_layover_airports: options.exclude_layover_airports,
-      alliances: options.alliances,
-      exclude_alliances: options.exclude_alliances,
-      max_price: options.max_price,
-      exclude_redeye: options.exclude_redeye,
-      aircraft_types: options.aircraft_types,
-      exclude_aircraft_types: options.exclude_aircraft_types,
-    });
-
-    legs.push({
-      leg: resolvedLeg,
-      total_results: result.total_results,
-      search_url: result.search_url,
-      cabin_honored: result.query.cabin_honored,
-      options: result.flights,
-      notes: result.notes,
-    });
-  }
-
-  // Sum the cheapest fare on each leg, when every leg priced at least one fare.
-  let cheapestTotal: MultiCityResult['cheapest_total'] = null;
-  const cheapestPerLeg = legs.map((entry) => entry.options[0]?.price);
-  if (cheapestPerLeg.every((price) => typeof price === 'number')) {
-    cheapestTotal = {
-      currency: options.currency,
-      total: cheapestPerLeg.reduce((sum, price) => sum + (price as number), 0),
-      per_leg: cheapestPerLeg as number[],
-      airlines: legs.map((entry) => entry.options[0]?.airline ?? ''),
-    };
-  }
-
-  const notes: string[] = [
-    'Google prices multi-city trips leg by leg, so each leg is searched as its own one-way trip. Pick one option per leg; the cheapest_total adds each leg\'s cheapest fare.',
-  ];
-  const emptyLegs = legs.filter((entry) => entry.options.length === 0);
-  if (emptyLegs.length > 0) {
-    emptyLegs.forEach((entry) =>
-      notes.push(`No fares found for ${entry.leg.origin} to ${entry.leg.destination} on ${entry.leg.date}.`)
-    );
-  }
-  if (!cheapestTotal && emptyLegs.length === 0) {
-    notes.push('Could not total the trip because at least one leg returned no priced fare.');
-  }
-
-  return { legs, cheapest_total: cheapestTotal, notes };
+    },
+    coverage_status,
+    legs,
+    cheapest_total: cheapestTotal,
+    notes,
+  };
 }
 
 /** Order priced destinations, cheapest (or quickest) first; unpriced ones last. */
