@@ -2,6 +2,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import type { IPointsYeahClient } from '../server.js';
 import { FlightSearchParamsSchema } from '../types.js';
 import type { FlightResult, FlightRoute } from '../types.js';
+import { normalizeSeatCount } from '../seat-availability.js';
 
 const PARAM_DESCRIPTIONS = {
   departure:
@@ -34,7 +35,7 @@ This tool searches PointsYeah for live flight availability using points and mile
 - Airline program and points required
 - Flight segments with times and cabin class
 - Available bank transfer options and point costs
-- Number of available seats
+- Reported seat counts (or 'seat count unverified' for unknown upstream inventory)
 
 **Use cases:**
 - Find the cheapest award flight between two cities
@@ -60,7 +61,7 @@ function formatRoute(route: FlightRoute): string {
 
   if (payment) {
     lines.push(
-      `  ${payment.miles.toLocaleString()} ${payment.unit} + $${payment.tax.toFixed(2)} tax | ${payment.cabin} | ${payment.seats} seat(s)`
+      `  ${payment.miles.toLocaleString()} ${payment.unit} + ${payment.tax.toFixed(2)} tax | ${payment.cabin} | ${normalizeSeatCount(payment.seats) === null ? 'seat count unverified' : `${payment.seats} reported seat(s)`}`
     );
   }
 
@@ -233,7 +234,11 @@ export function searchFlightsTool(_server: Server, clientFactory: () => IPointsY
             content: [
               {
                 type: 'text',
-                text: `No award flights found for ${params.departure} -> ${params.arrival} on ${params.departDate}.`,
+                text: [
+                  `No award flights matching the filters were returned for ${params.departure} -> ${params.arrival} on ${params.departDate}.`,
+                  params.minSeats ? `Routes with unverified seat counts cannot satisfy minSeats=${params.minSeats}. This does not prove no award may be booked.` : '',
+                  ...(searchResults.notes ?? []),
+                ].filter(Boolean).join('\n'),
               },
             ],
           };
