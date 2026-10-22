@@ -2,6 +2,7 @@ import type {
   IFlightsClient,
   SearchFlightsResult,
   FlightOffer,
+  CashPriceBasis,
 } from 'google-flights-mcp-server-shared';
 import type {
   IPointsYeahClient,
@@ -40,6 +41,26 @@ const SEAT_CLASS: Record<CompareOptions['cabin'], 'economy' | 'premium_economy' 
 /** Anything at or above this is generally considered a good use of points. */
 const DEFAULT_MIN_CENTS_PER_POINT = 1.5;
 
+/**
+ * Only compare apples to apples: a single-adult, one-way Google display price
+ * in the requested cabin. Even then this is INDICATIVE CPP, not checkout pricing.
+ * Missing provenance MUST fail closed, including for older connector clients.
+ */
+export function canUseCashForIndicativeCpp(
+  result: SearchFlightsResult | null,
+  adults: number,
+  roundTrip: boolean
+): boolean {
+  return result !== null &&
+    adults === 1 &&
+    !roundTrip &&
+    result.quote_status === 'indicative_one_way' &&
+    result.price_basis === 'google_displayed_fare_unverified' &&
+    result.query?.trip_type === 'one_way' &&
+    result.query?.cabin_honored === true &&
+    result.query?.passengers?.adults === 1;
+}
+
 /** Best value first; options with no valuation sink to the bottom. */
 function byAwardValue(a: AwardOption, b: AwardOption): number {
   const aValue = a.cents_per_point_with_bonus ?? a.cents_per_point ?? -1;
@@ -47,9 +68,10 @@ function byAwardValue(a: AwardOption, b: AwardOption): number {
   return bValue - aValue;
 }
 
-function toCashOption(offer: FlightOffer): CashOption {
+function toCashOption(offer: FlightOffer, quoteStatus: CashOption['quote_status']): CashOption {
   return {
     price: offer.price,
+    quote_status: quoteStatus,
     currency: offer.currency,
     airline: offer.airline,
     stops: offer.stops,
@@ -313,7 +335,13 @@ export class TripCompareClient {
         max_dates: 5,
         exclude_basic_economy: true,
       });
-      cashBest = grid.cheapest
+      // A cheap outbound-only RT display price cannot choose a defensible comparison date.
+      const gridComparable = !roundTrip &&
+        options.adults === 1 &&
+        grid.quote_status === 'indicative_one_way' &&
+        grid.price_basis === 'google_displayed_fare_unverified' &&
+        grid.cabin_honored === true;
+      cashBest = gridComparable && grid.cheapest
         ? { date: grid.cheapest.date, price: grid.cheapest.price, airline: grid.cheapest.airline }
         : null;
     } catch (error) {
@@ -353,7 +381,9 @@ export class TripCompareClient {
     }
 
     const comparedDate = cashBest?.date ?? options.departDate;
-    const parts = [`Compared on the cheapest cash day (${comparedDate}) in ${options.departDate}..${departDateTo}.`];
+    const parts = cashBest
+      ? [`Compared on the cheapest cash day (${comparedDate}) in ${options.departDate}..${departDateTo}.`]
+      : [`No comparable cash date-grid quote was available; kept the requested departure date ${comparedDate}. Unverified round-trip, party or cabin display prices cannot rank cash dates for CPP.`];
     if (pointsBest?.date && pointsBest.date !== comparedDate) {
       parts.push(
         `The cheapest award day was ${pointsBest.date} (${pointsBest.miles} miles on ${pointsBest.program}).`
@@ -512,15 +542,22 @@ export class TripCompareClient {
       logWarning('compare', `Cash lookup failed: ${cashSearchError}`);
     }
 
-    const cashOptions = (cashResult?.flights ?? []).map(toCashOption);
-    const cheapestCash = cashOptions[0] ?? null;
-    const cashPrice = cheapestCash?.price ?? null;
+    const quoteStatus: CashOption['quote_status'] = cashResult?.quote_status ?? 'unknown';
+    const priceBasis: CashPriceBasis | 'unknown' = cashResult?.price_basis ?? 'unknown';
+    const cashOptions = (cashResult?.flights ?? [])
+      .filter((offer) => Number.isFinite(offer.price) && offer.price > 0 && offer.currency === 'USD')
+      .map((offer) => toCashOption(offer, quoteStatus));
+    const cheapestCash = [...cashOptions].sort((a, b) => a.price - b.price)[0] ?? null;
+    const usableForValuation = cheapestCash !== null &&
+      canUseCashForIndicativeCpp(cashResult, options.adults, roundTrip);
+    // Explicitly separate the visible displayed fare from the price used in CPP.
+    const cashPrice = usableForValuation ? cheapestCash.price : null;
 
     const cashSearchStatus: CashSearchStatus = cashSearchError
       ? 'search_failed'
-      : cashOptions.length > 0
-        ? 'fares_found'
-        : 'no_fares_returned';
+      : cashOptions.length === 0 ? 'no_fares_returned'
+      : usableForValuation ? 'fares_found'
+      : 'fares_unverified';
 
     // Award side — a live PointsYeah search (browser-backed, slow).
     let pointsResult: FlightSearchResults | null = null;
@@ -611,7 +648,11 @@ export class TripCompareClient {
     const carrierGaps = coverageGapsForCarriers([...operatingCarriers]);
     const gaps = mergeCoverageGaps(carrierGaps, staticCoverageGaps());
     const gapText = describeCoverageGaps(gaps);
-    const cashNote = cashPrice !== null ? ` The cheapest cash fare found was ${cashPrice} USD.` : '';
+    const cashNote = cashPrice !== null
+      ? ` The cheapest INDICATIVE one-way displayed cash fare found was ${cashPrice} USD, not a checkout-verified total.`
+      : cashSearchStatus === 'fares_unverified'
+        ? ` Google returned displayed cash fares, but their full itinerary/passenger/cabin pricing status is unverified.`
+        : '';
 
     // Second source: only when there is a gap worth filling, and only one call.
     const secondSource = await this.checkSecondSource({
@@ -639,14 +680,17 @@ export class TripCompareClient {
       reason =
         `The live award search did not complete (${awardSearchError}), so no points value could be verified.` +
         `${cashNote} Treat the award side as "not checked", not as "no award space".`;
-    } else if (cashPrice === null && best) {
-      // The award side is verified; the cash side is not. Say which one is
-      // missing instead of calling the award the only way to take the trip.
-      recommendation = 'points';
+    } else if (cashSearchStatus === 'fares_unverified') {
+      recommendation = 'insufficient_data';
       reason =
-        cashSearchStatus === 'search_failed'
-          ? `The cash fare lookup did not complete (${cashSearchError}), so there is no cash price to compare. The ${best.program_name} award (${best.miles} miles + ${best.tax} ${best.tax_currency}) is verified; treat the cash side as "not checked".`
-          : `The cash lookup returned no fares for this date. The ${best.program_name} award (${best.miles} miles + ${best.tax} ${best.tax_currency}) is verified, but that is not proof no cash fare exists — re-check other dates or sources before assuming points is the only way.`;
+        `Google returned a reference cash fare, but it is not a comparable completed ticket price (quote_status=${quoteStatus}, price_basis=${priceBasis}, adults=${options.adults}).` +
+        ' A round trip must include a selected return flight; multiple passengers require a verified price basis; the requested cabin must be honored. No cash-vs-points CPP or definitive recommendation is possible yet.' +
+        (awardSearchStatus === 'seats_unverified' ? ' Award seat inventory also could not be confirmed.' : '');
+    } else if (cashPrice === null) {
+      recommendation = 'insufficient_data';
+      reason = cashSearchStatus === 'search_failed'
+        ? `The cash fare lookup did not complete (${cashSearchError}); no comparable cash price is available, so a cash-vs-points recommendation is not justified. Award options, if any, remain leads to verify.`
+        : `The cash lookup returned no comparable fares. That is not proof no cash fare exists, and the award side cannot be valued against a missing cash price. Re-check other dates or sources before making a points-vs-cash decision.`;
     } else if (!best && awardSearchStatus === 'seats_insufficient') {
       recommendation = 'cash';
       // Every option falls short of the party size, so report the roomiest one.
@@ -697,6 +741,12 @@ export class TripCompareClient {
         price_history_low: cashResult?.price_insights?.range_low ?? null,
         search_url: cashResult?.search_url ?? '',
         search_status: cashSearchStatus,
+        quote_status: quoteStatus,
+        price_basis: priceBasis,
+        party_total: null,
+        checkout_verified: false,
+        usable_for_valuation: usableForValuation,
+        comparable_price: cashPrice,
         search_error: cashSearchError,
       },
       points: {

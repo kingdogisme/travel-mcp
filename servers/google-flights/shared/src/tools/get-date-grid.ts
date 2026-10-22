@@ -145,7 +145,9 @@ export const GetDateGridSchema = z.object({
 export function getDateGridTool(_server: Server, clientFactory: FlightsClientFactory) {
   return {
     name: 'get_date_grid',
-    description: `Get a date-price grid for a route showing the lowest flight price for each day.
+    description: `For round_trip, grid cells are INDICATIVE Google outbound-selection prices, NOT checked-out return flight pairs. Every result supplies quote_status and price_basis, and no passenger-party total is verified.
+
+Get a date-price grid for a route showing the lowest flight price for each day.
 
 Prices each date in a window with a live Google Flights lookup and returns the cheapest itinerary per date, the overall cheapest date, and a cheapest_dates shortlist.
 

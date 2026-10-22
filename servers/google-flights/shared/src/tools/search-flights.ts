@@ -166,7 +166,9 @@ export const SearchFlightsSchema = z.object({
 export function searchFlightsTool(_server: Server, clientFactory: FlightsClientFactory) {
   return {
     name: 'search_flights',
-    description: `Search for flights on Google Flights with full filtering and pagination.
+    description: `Search returns Google-displayed fares, NOT a verified airline checkout price. For round_trip, only OUTBOUND selections are parsed: return flights are not selected and the price is indicative, not a completed flight-pair quote. For all trips the price_basis remains unverified; do not treat it as an all-passenger total.
+
+Search for flights on Google Flights with full filtering and pagination.
 
 Returns structured flight data including prices, airlines, times, durations, stops, individual flight segments with aircraft type and legroom, fare brand (e.g. "Economy", "Economy+", "Economy Flex"), and fare extensions (carry-on and checked bag inclusion).
 

@@ -90,7 +90,9 @@ export const GetRoundTripGridSchema = z.object({
 export function getRoundTripGridTool(_server: Server, clientFactory: FlightsClientFactory) {
   return {
     name: 'get_round_trip_grid',
-    description: `Price a grid of round trips: departure dates across a window crossed with a range of trip lengths.
+    description: `IMPORTANT: these are INDICATIVE Google outbound-selection DISPLAY prices for date+night combinations. The scraper has NOT selected any matching return flight or verified the final combined airfare. Never treat the grid minimum as a bookable round-trip checkout quote.
+
+Price a grid of round trips: departure dates across a window crossed with a range of trip lengths.
 
 Give a departure window (start_date / end_date) and a trip-length range (min_nights / max_nights), and this returns the cheapest round-trip fare for each (departure date, trip length) cell, plus the cheapest cell overall, the cheapest cell per departure date and the cheapest cell per trip length. It answers "when should I go, and for how long?" in one call.
 
