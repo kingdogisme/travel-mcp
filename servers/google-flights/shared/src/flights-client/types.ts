@@ -474,8 +474,10 @@ export interface RoundTripPairsOptions {
   adults: number;
   children: number;
   currency: string;
-  /** Filtering applies to the RETURN options; selected outbound must be nonstop. */
+  /** Maximum stops on RETURN options (separate from outbound). */
   max_stops: 'any' | 'nonstop' | '1' | '2';
+  /** Outbound selection defaults to nonstop; enable one connection explicitly. */
+  outbound_max_stops?: 'nonstop' | '1';
   exclude_basic_economy: boolean;
   /** At most four outbound options may be selected, to protect Google rate limits. */
   max_outbounds: number;

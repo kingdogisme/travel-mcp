@@ -12,7 +12,9 @@ export const SearchRoundTripPairsSchema = z.object({
   children: z.number().int().min(0).max(9).default(0),
   currency: z.string().length(3).default('USD'),
   max_stops: z.enum(['any', 'nonstop', '1', '2']).default('1')
-    .describe('Max stops for return options; this experiment pins NONSTOP outbounds only'),
+    .describe('Max stops for returned inbound choices'),
+  outbound_max_stops: z.enum(['nonstop', '1']).default('nonstop')
+    .describe('Maximum outbound stops: default nonstop, opt into at most one connection; pins ALL physical segments'),
   exclude_basic_economy: z.boolean().default(true),
   max_outbounds: z.number().int().min(1).max(4).default(2)
     .describe('How many nonstop outbounds to pin (each costs an additional Google request)'),
@@ -22,9 +24,9 @@ export const SearchRoundTripPairsSchema = z.object({
 export function searchRoundTripPairsTool(_server: Server, factory: FlightsClientFactory) {
   return {
     name: 'search_round_trip_pairs',
-    description: `EXPERIMENTAL Google Flights round-trip PAIR selection. Unlike search_flights(round_trip), this tool attempts the real second stage: select a nonstop outbound via its Google token and search matching return flights in the same round-trip TFS. Each output has outbound + return_flight + displayed_round_trip_price. Skips any result that fails strict route/date validation.
+    description: `EXPERIMENTAL Google Flights round-trip PAIR selection. Unlike search_flights(round_trip), this tool attempts the real second stage: select an outbound with up to one connection via its Google token and ALL physical TFS legs and search matching return flights in the same round-trip TFS. Each output has outbound + return_flight + displayed_round_trip_price. Skips any result that fails strict route/date validation.
 
-P0 guardrails: Return selections are NOT airline-checkout-verified, price_basis is unverified, and party_total remains null even for two adults. No fake flight pair or party price is ever synthesized. If Google changes its undocumented selection format, search_status/diagnostics report no paired results or partial failure. Economy only, maximum four selected outbounds, maximum 15 returns each. Use research results to cross-check on Google Flights before booking; do not automatically feed this experimental price into trip-compare CPP.`,
+P0 guardrails: Return selections are NOT airline-checkout-verified, price_basis is unverified, and party_total remains null even for two adults. No fake flight pair or party price is ever synthesized. If Google changes its undocumented selection format, search_status/diagnostics report no paired results or partial failure. Economy only, one-stop outbound opt-in, maximum four selected outbounds, maximum 15 returns each. Use research results to cross-check on Google Flights before booking; do not automatically feed this experimental price into trip-compare CPP.`,
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -37,6 +39,10 @@ P0 guardrails: Return selections are NOT airline-checkout-verified, price_basis 
         children: { type: 'number', description: 'Child passengers (default 0)' },
         currency: { type: 'string', description: 'Currency ISO code (default USD)' },
         max_stops: { type: 'string', enum: ['any', 'nonstop', '1', '2'], description: 'Return maximum stops' },
+        outbound_max_stops: {
+          type: 'string', enum: ['nonstop', '1'],
+          description: 'Outbound maximum stops (default nonstop, set 1 for connecting), select all physical legs',
+        },
         exclude_basic_economy: { type: 'boolean', description: 'Exclude stripped-down basic fares' },
         max_outbounds: { type: 'number', minimum: 1, maximum: 4, description: 'How many nonstop outbounds to select, default 2' },
         max_return_options: { type: 'number', minimum: 1, maximum: 15, description: 'Return options per selected outbound, default 5' },
