@@ -132,6 +132,8 @@ export type AwardSearchStatus =
   /** Award options came back but none reported a seat count. */
   | 'seats_unverified'
   | 'no_awards_returned'
+  /** Upstream PointsYeah never confirmed complete; results are partial leads. */
+  | 'search_incomplete'
   | 'search_failed';
 
 export type CashSearchStatus = 'fares_found' | 'fares_unverified' | 'no_fares_returned' | 'search_failed';
@@ -186,6 +188,8 @@ export interface CompareResult {
      * searched returned nothing — it is not evidence that no award is bookable.
      */
     search_status: AwardSearchStatus;
+    /** Upstream PointsYeah task completion, independent of filtered group count. */
+    completion_status: 'completed' | 'partial_timeout' | 'partial_error' | 'unknown';
     /** Error text when the award search failed outright, else null. */
     search_error: string | null;
     /** Program codes the live search actually queried. */

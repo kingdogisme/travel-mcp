@@ -294,6 +294,43 @@ const BASE: CompareOptions = {
   cashLimit: 5,
 };
 
+describe('PointsYeah incomplete upstream searches', () => {
+  it('never recommends points or computes CPP after a partial timeout, even with seats', async () => {
+    const awards = { ...awardResult({ seats: 9 }), completion_status: 'partial_timeout' as const };
+    const { client } = makeClient({ awards });
+    const response = await client.comparePointsVsCash(BASE);
+    expect(response.points.completion_status).toBe('partial_timeout');
+    expect(response.points.search_status).toBe('search_incomplete');
+    expect(response.points.options.length).toBeGreaterThan(0);
+    expect(response.points.options.every(option => option.cents_per_point === null)).toBe(true);
+    expect(response.verdict.recommendation).toBe('insufficient_data');
+    expect(response.verdict.cents_per_point).toBeNull();
+    expect(response.verdict.best_award_program).toBeNull();
+    expect(response.verdict.reason).toContain('partial_timeout');
+  });
+
+  it('treats partial results without awards as unknown, not a successful empty search', async () => {
+    const awards = { ...awardResult(), completion_status: 'partial_error' as const, results: [] };
+    const { client } = makeClient({ awards });
+    const response = await client.comparePointsVsCash(BASE);
+    expect(response.points.search_status).toBe('search_incomplete');
+    expect(response.points.options).toHaveLength(0);
+    expect(response.verdict.recommendation).toBe('insufficient_data');
+    expect(response.verdict.reason).toContain('partial_error');
+    expect(response.verdict.reason).not.toContain('returned no award space');
+  });
+
+  it('can still make an indicative recommendation when PointsYeah reports completed', async () => {
+    const awards = { ...awardResult(), completion_status: 'completed' as const };
+    const { client } = makeClient({ awards });
+    const response = await client.comparePointsVsCash(BASE);
+    expect(response.points.completion_status).toBe('completed');
+    expect(response.points.search_status).toBe('awards_found');
+    expect(response.verdict.recommendation).toBe('points');
+    expect(response.verdict.cents_per_point).not.toBeNull();
+  });
+});
+
 describe('comparePointsVsCash verdicts', () => {
   it('recommends points when the award clears the cents-per-point threshold', async () => {
     const { client } = makeClient({});

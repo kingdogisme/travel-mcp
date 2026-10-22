@@ -19,6 +19,7 @@ export type {
   FlightPayment,
   FlightSegment,
   FlightSearchResults,
+  AwardSearchCompletion,
   TransferOption,
   TransferBonus,
   TransferBonusSearchResult,

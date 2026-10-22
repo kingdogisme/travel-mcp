@@ -43,9 +43,9 @@ This tool searches PointsYeah for live flight availability using points and mile
 - Discover transfer partner options from bank reward programs
 - Search for premium cabin availability (Business, First)
 
-**Note:** This performs a live search that may take 30-90 seconds to complete as it queries multiple airline programs in real time.
+**Note:** A typical live search takes 30-90 seconds. Slow searches stop before the Vercel function limit and explicitly return completion_status=partial_timeout or partial_error with PARTIAL results; this is not proof that no other awards exist. The results may include alternate airports in the same city (for example HND and NRT).
 
-**Narrowing a search:** pass banks / airlineProgram to search fewer programs, set multiday with departDateTo for a flexible date range, or set transferBonusOnly to see only options that currently have a bank transfer bonus. Result-side filters (maxMiles, maxTax, maxStops, minSeats, maxLayoverMinutes, excludeRedeye) trim the response locally after the search. A 9999 seat count is unverified, not 9999 bookable awards; unknown inventory never passes minSeats.`;
+**Narrowing a search:** pass banks / airlineProgram to search fewer programs, set multiday with departDateTo for a flexible date range, or set transferBonusOnly to see only options that currently have a bank transfer bonus. Result-side filters (maxMiles, maxTax, maxStops, minSeats, maxLayoverMinutes, excludeRedeye) trim the response locally after the search. `limit` caps program/date GROUPS, not individual flights. `maxOptions` (default 40 for the MCP tool) caps the total individual itineraries shown. A 9999 seat count is unverified, not 9999 bookable awards; unknown inventory never passes minSeats.`;
 
 function formatDuration(minutes: number): string {
   const hours = Math.floor(minutes / 60);
@@ -196,13 +196,20 @@ export function searchFlightsTool(_server: Server, clientFactory: () => IPointsY
           enum: ['program', 'miles', 'tax', 'duration'],
           description: 'Ordering for returned results (default: program order)',
         },
-        limit: { type: 'number', description: 'Cap how many results are returned' },
+        limit: { type: 'number', minimum: 1, maximum: 200, description: 'Cap loyalty-program/date result GROUPS, not individual itineraries' },
+        maxOptions: {
+          type: 'number', minimum: 1, maximum: 200, default: 40,
+          description: 'Cap individual award flight itineraries across all result groups (default 40)',
+        },
       },
       required: ['departure', 'arrival', 'departDate'],
     },
     handler: async (args: unknown) => {
       try {
-        const params = FlightSearchParamsSchema.parse(args);
+        const parsed = FlightSearchParamsSchema.parse(args);
+        // Only the public search_flights MCP tool applies a default output cap;
+        // trip-compare and bonus/date research keep their previous semantics.
+        const params = { ...parsed, maxOptions: parsed.maxOptions ?? 40 };
 
         if (params.tripType === '3' && !(params.departure2 && params.arrival2 && params.departDate2)) {
           return {
@@ -237,7 +244,9 @@ export function searchFlightsTool(_server: Server, clientFactory: () => IPointsY
               {
                 type: 'text',
                 text: [
-                `No award flights returned for ${params.departure} -> ${params.arrival} on ${params.departDate}.`,
+                `No award flight itineraries observed for ${params.departure} -> ${params.arrival} on ${params.departDate}.`,
+                `Search completion: ${searchResults.completion_status ?? 'unknown'}; polls: ${searchResults.poll_count ?? 'unknown'}.`,
+                ...(searchResults.completion_status && searchResults.completion_status !== 'completed' ? ['WARNING: Search was incomplete. No-results does not establish lack of award availability.'] : []),
                 ...(params.minSeats ? ['Unknown seat inventory cannot satisfy minSeats; this is not proof there are no bookable awards.'] : []),
                 ...(searchResults.notes ?? []),
               ].join('\n'),
@@ -264,10 +273,19 @@ export function searchFlightsTool(_server: Server, clientFactory: () => IPointsY
             ? `**Banks:** ${params.banks.join(', ')}`
             : '',
           params.transferBonusOnly ? '**Filter:** transfer bonus only' : '',
-          `**Results found:** ${searchResults.total} flight option(s)` +
+          `**Search completion:** ${searchResults.completion_status ?? 'unknown'}`,
+          `**Elapsed:** ${searchResults.elapsed_ms ?? 'unknown'} ms; **polls:** ${searchResults.poll_count ?? 'unknown'}`,
+          `**Result groups:** ${searchResults.total} program/date group(s)` +
             (searchResults.unfiltered_total !== searchResults.total
-              ? ` (from ${searchResults.unfiltered_total} before filters)`
+              ? ` (from ${searchResults.unfiltered_total} upstream group(s))`
               : ''),
+          `**Flight itineraries shown:** ${searchResults.option_total ?? searchResults.results.reduce((n, x) => n + (x.routes?.length ?? 0), 0)}` +
+            (searchResults.matched_option_total !== undefined
+              ? ` (of ${searchResults.matched_option_total} matching after filters, ${searchResults.omitted_option_total ?? 0} omitted by maxOptions)`
+              : ''),
+          ...(searchResults.completion_status && searchResults.completion_status !== 'completed'
+            ? ['**WARNING:** Partial PointsYeah search. These are leads, not a complete survey of award programs or seats.']
+            : []),
           ...(searchResults.notes ?? []).map((note) => `**Note:** ${note}`),
           '',
         ];

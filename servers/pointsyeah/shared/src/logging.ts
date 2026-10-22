@@ -37,3 +37,20 @@ export function logDebug(context: string, message: string): void {
     console.error(`[DEBUG] ${context}: ${message}`);
   }
 }
+
+/**
+ * Low-cardinality, structured operational telemetry. Stdout is reserved
+ * for JSON-RPC in local stdio MCP mode; only Vercel logs metrics to stdout.
+ * Never pass tokens, task IDs, route details, passengers or full API responses.
+ */
+export function logMetric(
+  event: string,
+  values: Record<string, string | number | boolean | null>
+): void {
+  const payload = JSON.stringify({ event, ...values });
+  if (process.env.VERCEL) {
+    console.log('[METRIC] ' + payload);
+  } else {
+    logDebug('metric', payload);
+  }
+}

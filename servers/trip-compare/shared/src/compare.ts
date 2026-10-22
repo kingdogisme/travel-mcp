@@ -579,12 +579,18 @@ export class TripCompareClient {
         sortBy: 'miles',
         maxMiles: options.maxMiles,
         limit: options.pointsLimit,
+        // pointsLimit historically caps program/date GROUPS. Also bound the
+        // concrete itinerary count to prevent enormous comparison payloads.
+        maxOptions: Math.min(80, Math.max(10, (options.pointsLimit ?? 8) * 5)),
       });
     } catch (error) {
       awardSearchError = error instanceof Error ? error.message : String(error);
       logWarning('compare', `Award lookup failed: ${awardSearchError}`);
     }
 
+    const awardCompletion = pointsResult?.completion_status ?? 'unknown';
+    const awardSearchIncomplete =
+      awardCompletion === 'partial_timeout' || awardCompletion === 'partial_error';
     const awardOptions: AwardOption[] = [];
     const programsSeen: string[] = [];
     const operatingCarriers = new Set<string>();
@@ -599,7 +605,7 @@ export class TripCompareClient {
         const option = toAwardOption(
           result,
           route,
-          cashPrice,
+          awardSearchIncomplete ? null : cashPrice,
           options.transferBonusPercent ?? null,
           options.useTransferBonuses !== false,
           carriers
@@ -620,7 +626,9 @@ export class TripCompareClient {
     // Only a live award search may drive the valuation: cached observations are
     // leads to verify, and an unreported seat count cannot cover a party.
     const liveOptions = awardOptions.filter((option) => option.verification === 'live-search');
-    const eligible = liveOptions.filter(
+    // An incomplete poll can still contain promising leads, but not enough
+    // evidence to rank the whole award market or recommend a points purchase.
+    const eligible = awardSearchIncomplete ? [] : liveOptions.filter(
       (option) => option.seats !== null && option.seats >= options.adults
     );
     const best = eligible[0] ?? null;
@@ -634,6 +642,8 @@ export class TripCompareClient {
     let awardSearchStatus: AwardSearchStatus;
     if (awardSearchError) {
       awardSearchStatus = 'search_failed';
+    } else if (awardSearchIncomplete) {
+      awardSearchStatus = 'search_incomplete';
     } else if (liveOptions.length === 0) {
       awardSearchStatus = 'no_awards_returned';
     } else if (eligible.length === 0) {
@@ -680,6 +690,11 @@ export class TripCompareClient {
       reason =
         `The live award search did not complete (${awardSearchError}), so no points value could be verified.` +
         `${cashNote} Treat the award side as "not checked", not as "no award space".`;
+    } else if (awardSearchStatus === 'search_incomplete') {
+      recommendation = 'insufficient_data';
+      reason =
+        `The PointsYeah search ended ${awardCompletion}, before reporting completion. Any award itineraries shown are partial research leads, not a complete or reliably rankable set.` +
+        `${cashNote} No points-vs-cash CPP or definitive recommendation is valid until a complete search finishes.`;
     } else if (cashSearchStatus === 'fares_unverified') {
       recommendation = 'insufficient_data';
       reason =
@@ -754,6 +769,7 @@ export class TripCompareClient {
         programs_seen: programsSeen,
         unfiltered_total: pointsResult?.unfiltered_total ?? 0,
         search_status: awardSearchStatus,
+        completion_status: awardCompletion,
         search_error: awardSearchError,
         programs_searched: [...SEARCHED_PROGRAM_CODES],
         coverage_gaps: gaps,
