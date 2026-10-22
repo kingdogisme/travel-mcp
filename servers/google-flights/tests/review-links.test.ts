@@ -98,9 +98,14 @@ describe('exact Google Flights review links', () => {
     expect(root.find((x) => x.n === 9)?.v).toBe('1');
     expect(root.find((x) => x.n === 14)?.v).toBe('1');
     expect(root.find((x) => x.n === 19)?.v).toBe('1');
-    const pack = root.find((x) => x.n === 8)?.v;
-    expect(pack).toBeInstanceOf(Uint8Array);
-    expect([...pack as Uint8Array]).toEqual([1, 1]);
+    // Protobufjs emits proto2-style repeated passenger varints rather than
+    // one packed byte array. Both encodings are semantically equivalent.
+    const travellerTypes = root.filter((x) => x.n === 8).flatMap((field) =>
+      field.v instanceof Uint8Array
+        ? [...field.v]
+        : [Number(field.v)]
+    );
+    expect(travellerTypes).toEqual([1, 1]);
     const pin = root.find((x) => x.n === 16);
     expect(pin).toBeDefined();
     expect(legFields(pin!).find((x) => x.n === 1)?.v).toBe('18446744073709551615');
