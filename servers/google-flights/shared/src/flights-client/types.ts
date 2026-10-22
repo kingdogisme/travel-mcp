@@ -389,6 +389,9 @@ export interface MultiCityResult {
   /** Not a jointly priced multi-city ticket. */
   pricing_mode: 'separate_one_ways';
   joint_ticket_quote: null;
+  /** Unverified manual Google Multi-city search link; NEVER a ticket quote. */
+  joint_research_url: string | null;
+  joint_research_url_status: 'unverified_google_ui' | 'unavailable';
   /** Google displayed fare; this parser cannot establish whether it is per passenger or per party. */
   price_basis: 'google_displayed_fare_unverified';
   passengers: {
@@ -495,6 +498,9 @@ export interface SelectedRoundTripPair {
   price_basis: 'google_displayed_fare_unverified';
   party_total: null;
   checkout_verified: false;
+  /** Exact-flight Google booking PAGE deep link; not an airline checkout URL. */
+  google_booking_page_url: string | null;
+  google_booking_page_status: 'encoded_unverified' | 'unavailable';
   /** Second-stage Google URL with the selected outbound encoded. */
   search_url: string;
 }

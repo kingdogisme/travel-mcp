@@ -111,7 +111,7 @@ export function searchMultiCityTool(_server: Server, clientFactory: FlightsClien
 
 Search a multi-city trip (2-6 legs) on Google Flights.
 
-IMPORTANT: Google Flights offers a real Multi-city booking flow, but THIS MCP IMPLEMENTATION DOES NOT FETCH IT. It searches every leg as an independent one-way trip, then calculates a reference sum of their lowest filtered Google-displayed fares. The returned cheapest_total is NOT a joint-ticket quote, not a confirmed per-passenger quote, and not a verified total for all travelers. joint_ticket_quote is null and price_basis is unverified. Per-leg status and coverage_status reveal failures or empty results without claiming sold-out flights.
+IMPORTANT: Google Flights offers a real Multi-city booking flow, but THIS MCP IMPLEMENTATION DOES NOT FETCH IT. It searches every leg as an independent one-way trip, then calculates a reference sum of their lowest filtered Google-displayed fares. The returned cheapest_total is NOT a joint-ticket quote, not a confirmed per-passenger quote, and not a verified total for all travelers. joint_ticket_quote is null and price_basis is unverified. joint_research_url (when available) is an UNVERIFIED Google Multi-city search UI link for manual validation, not a bookable combined fare. Per-leg status and coverage_status reveal failures or empty results without claiming sold-out flights.
 
 Pass the legs in travel order, for example:
   legs: [

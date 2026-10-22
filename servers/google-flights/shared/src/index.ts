@@ -20,6 +20,7 @@ export {
   searchAnywhere,
 } from './flights-client/flights-client.js';
 export { searchRoundTripPairs, isMatchingReturn } from './flights-client/round-trip-pairs.js';
+export { buildExactRoundTripReviewLink, buildMultiCityResearchLink } from './flights-client/review-links.js';
 export { buildSelectionTfu, fetchSelectedReturnOffers } from './flights-client/flights-client.js';
 export type {
   FlightOffer,
