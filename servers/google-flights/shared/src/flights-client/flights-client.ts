@@ -197,8 +197,18 @@ function getProtoRoot(): protobuf.Root {
 
   // Google encodes multi-airport legs by repeating these fields, so they must be
   // declared as repeated even though a single-airport search only sets one.
+  // Google TFS round-trip second stage pins the outbound flight in FlightData field 4.
+  // Fields verified against the MIT-licensed nickvanw/flights reference implementation.
+  const SelectedFlight = new protobuf.Type('SelectedFlight')
+    .add(new protobuf.Field('from', 1, 'string'))
+    .add(new protobuf.Field('date', 2, 'string'))
+    .add(new protobuf.Field('to', 3, 'string'))
+    .add(new protobuf.Field('airline', 5, 'string'))
+    .add(new protobuf.Field('flightNumber', 6, 'string'));
+
   const FlightData = new protobuf.Type('FlightData')
     .add(new protobuf.Field('date', 2, 'string'))
+    .add(new protobuf.Field('selectedFlight', 4, 'SelectedFlight'))
     .add(new protobuf.Field('maxStops', 9, 'int32', 'optional'))
     .add(new protobuf.Field('fromFlight', 13, 'Airport', 'repeated'))
     .add(new protobuf.Field('toFlight', 14, 'Airport', 'repeated'));
@@ -233,6 +243,7 @@ function getProtoRoot(): protobuf.Root {
     .add(new protobuf.Field('trip', 19, 'Trip'));
 
   root.add(Airport);
+  root.add(SelectedFlight);
   root.add(FlightData);
   root.add(Seat);
   root.add(Trip);
@@ -275,6 +286,8 @@ export async function buildTfsParam(options: {
   infantsInSeat: number;
   infantsOnLap: number;
   maxStops?: number;
+  /** Experimental second-stage selection: currently supports a nonstop outbound only. */
+  selectedOutbound?: FlightSegment;
 }): Promise<string> {
   const root = getProtoRoot();
   const Info = root.lookupType('Info');
@@ -299,6 +312,27 @@ export async function buildTfsParam(options: {
   };
   if (options.maxStops !== undefined) {
     outboundLeg.maxStops = options.maxStops;
+  }
+  if (options.selectedOutbound) {
+    if (options.tripType !== 'round_trip' || !options.returnDate) {
+      throw new Error('Selecting an outbound requires a round_trip search with returnDate');
+    }
+    const selected = options.selectedOutbound;
+    const flightMatch = selected.flight_number.toUpperCase().match(/^([A-Z0-9]{2})([0-9]{1,4})$/);
+    if (!flightMatch ||
+        selected.airline_code.toUpperCase() !== flightMatch[1] ||
+        selected.departure_date !== options.departureDate ||
+        !origins.includes(selected.origin) ||
+        !destinations.includes(selected.destination)) {
+      throw new Error('Selected outbound flight does not match the requested airports, date or airline code');
+    }
+    outboundLeg.selectedFlight = {
+      from: selected.origin,
+      date: selected.departure_date,
+      to: selected.destination,
+      airline: selected.airline_code,
+      flightNumber: flightMatch[2],
+    };
   }
   flightData.push(outboundLeg as unknown as protobuf.Message);
 
@@ -328,6 +362,35 @@ export async function buildTfsParam(options: {
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
     .replace(/=+$/, '');
+}
+
+/**
+ * Google Flights second-stage TFU: field 1 contains raw outbound selection
+ * token bytes; fields 2 and 4 are the selection-flow envelope. Reference:
+ * https://github.com/nickvanw/flights/blob/main/encode_return.go (MIT).
+ *
+ * This is a public itinerary-selection token, NOT a checkout confirmation.
+ */
+export function buildSelectionTfu(token: string): string {
+  const input = token.trim();
+  if (!/^[A-Za-z0-9+/_=-]{4,16384}$/.test(input)) {
+    throw new Error('Invalid or missing Google outbound selection token');
+  }
+  const canonical = input.replace(/-/g, '+').replace(/_/g, '/').replace(/=+$/, '');
+  const tokenBytes = Buffer.from(canonical, 'base64');
+  if (tokenBytes.length === 0 || tokenBytes.length > 12000 ||
+      tokenBytes.toString('base64').replace(/=+$/, '') !== canonical) {
+    throw new Error('Could not validate Google outbound selection token');
+  }
+
+  const f2 = protobuf.Writer.create().uint32(8).uint32(0).finish();
+  const f4 = protobuf.Writer.create().uint32(10).bytes(Buffer.from('0')).finish();
+  const envelope = protobuf.Writer.create()
+    .uint32(10).bytes(tokenBytes)
+    .uint32(18).bytes(f2)
+    .uint32(34).bytes(f4)
+    .finish();
+  return Buffer.from(envelope).toString('base64');
 }
 
 // =============================================================================
@@ -1034,6 +1097,29 @@ async function fetchSearchPage(options: SearchPageOptions): Promise<FetchedSearc
     url,
     cabin_honored: options.seat_class === 'economy',
   };
+}
+
+/**
+ * Follow the selected outbound within the SAME Google round-trip TFS.
+ * This differs from a separate one-way return search: options are generated
+ * with the previously selected outbound pinned. Results remain indicative
+ * until booking provider checkout verifies a final fare.
+ */
+export async function fetchSelectedReturnOffers(
+  tfs: string,
+  tfu: string,
+  currency: string
+): Promise<{ offers: FlightOffer[]; search_url: string }> {
+  if (!tfs || !tfu) throw new Error('Both selected TFS and TFU are required');
+  const url = new URL(buildFlightsUrl(tfs, currency));
+  url.searchParams.set('tfu', tfu);
+  const search_url = url.toString();
+  const html = await rateLimitedFetch(search_url);
+  const ds1 = extractDs1(html);
+  if (!ds1) {
+    throw new Error('Google returned no recognizable selected-return results');
+  }
+  return { offers: parseFlightOffers(ds1, currency), search_url };
 }
 
 /** Parse the historical low-price series Google embeds (past ~60 days). */

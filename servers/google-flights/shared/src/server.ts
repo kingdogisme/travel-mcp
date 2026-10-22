@@ -9,6 +9,7 @@ import {
   getRoundTripGrid,
   searchAnywhere,
 } from './flights-client/flights-client.js';
+import { searchRoundTripPairs } from './flights-client/round-trip-pairs.js';
 import type {
   SearchFlightsOptions,
   SearchFlightsResult,
@@ -21,6 +22,8 @@ import type {
   RoundTripGridResult,
   SearchAnywhereOptions,
   SearchAnywhereResult,
+  RoundTripPairsOptions,
+  RoundTripPairsResult,
 } from './flights-client/types.js';
 
 export interface IFlightsClient {
@@ -28,6 +31,7 @@ export interface IFlightsClient {
   getDateGrid(options: GetDateGridOptions): Promise<DateGridResult>;
   findAirportCode(query: string): Promise<AirportResult[]>;
   searchMultiCity(options: SearchMultiCityOptions): Promise<MultiCityResult>;
+  searchRoundTripPairs(options: RoundTripPairsOptions): Promise<RoundTripPairsResult>;
   getRoundTripGrid(options: RoundTripGridOptions): Promise<RoundTripGridResult>;
   searchAnywhere(options: SearchAnywhereOptions): Promise<SearchAnywhereResult>;
 }
@@ -49,6 +53,10 @@ export class GoogleFlightsClient implements IFlightsClient {
 
   async searchMultiCity(options: SearchMultiCityOptions): Promise<MultiCityResult> {
     return searchMultiCity(options);
+  }
+
+  async searchRoundTripPairs(options: RoundTripPairsOptions): Promise<RoundTripPairsResult> {
+    return searchRoundTripPairs(options);
   }
 
   async getRoundTripGrid(options: RoundTripGridOptions): Promise<RoundTripGridResult> {

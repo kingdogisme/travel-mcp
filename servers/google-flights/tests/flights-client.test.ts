@@ -355,6 +355,7 @@ describe('tool registry', () => {
     expect(getAllToolNames()).toEqual([
       'search_flights',
       'search_multi_city',
+      'search_round_trip_pairs',
       'get_date_grid',
       'get_round_trip_grid',
       'search_anywhere',

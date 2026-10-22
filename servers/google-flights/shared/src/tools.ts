@@ -5,6 +5,7 @@ import { searchFlightsTool } from './tools/search-flights.js';
 import { getDateGridTool } from './tools/get-date-grid.js';
 import { findAirportCodeTool } from './tools/find-airport-code.js';
 import { searchMultiCityTool } from './tools/search-multi-city.js';
+import { searchRoundTripPairsTool } from './tools/search-round-trip-pairs.js';
 import { getRoundTripGridTool } from './tools/get-round-trip-grid.js';
 import { searchAnywhereTool } from './tools/search-anywhere.js';
 
@@ -27,6 +28,7 @@ type ToolFactory = (server: Server, clientFactory: FlightsClientFactory) => Tool
 const ALL_TOOLS: ToolFactory[] = [
   searchFlightsTool,
   searchMultiCityTool,
+  searchRoundTripPairsTool,
   getDateGridTool,
   getRoundTripGridTool,
   searchAnywhereTool,

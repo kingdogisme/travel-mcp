@@ -122,7 +122,11 @@ export interface FlightExtensions {
   checked_bags_included: number;
 }
 
-export type CashQuoteStatus = 'indicative_one_way' | 'round_trip_return_unselected';
+export type CashQuoteStatus =
+  | 'indicative_one_way'
+  | 'round_trip_return_unselected'
+  /** Google returned an inbound option after selecting a specific outbound. */
+  | 'round_trip_pair_selected';
 export type CashPriceBasis = 'google_displayed_fare_unverified';
 
 /** Google display data, NOT a verified party total or ticketed checkout amount. */
@@ -451,6 +455,75 @@ export interface SearchMultiCityOptions {
   aircraft_types?: string[];
   /** Drop itineraries that use any of these aircraft types (substring match). */
   exclude_aircraft_types?: string[];
+}
+
+// =============================================================================
+// EXPERIMENTAL ROUND-TRIP PAIR SELECTION
+//
+// This runs the second Google selection stage. It does NOT verify a booking
+// provider's checkout quote or infer the cost for an entire passenger party.
+// =============================================================================
+
+export interface RoundTripPairsOptions {
+  origin: string;
+  destination: string;
+  departure_date: string;
+  return_date: string;
+  /** First version deliberately supports economy only: selected TFS can ignore other cabins. */
+  seat_class: 'economy';
+  adults: number;
+  children: number;
+  currency: string;
+  /** Filtering applies to the RETURN options; selected outbound must be nonstop. */
+  max_stops: 'any' | 'nonstop' | '1' | '2';
+  exclude_basic_economy: boolean;
+  /** At most four outbound options may be selected, to protect Google rate limits. */
+  max_outbounds: number;
+  /** Display at most this many matched returns for each outbound. */
+  max_return_options: number;
+}
+
+export interface SelectedRoundTripPair {
+  outbound: FlightOffer;
+  return_flight: FlightOffer;
+  /** Price shown by Google AFTER choosing outbound and return; not checkout-verified. */
+  displayed_round_trip_price: number;
+  currency: string;
+  quote_status: 'round_trip_pair_selected';
+  price_basis: 'google_displayed_fare_unverified';
+  party_total: null;
+  checkout_verified: false;
+  /** Second-stage Google URL with the selected outbound encoded. */
+  search_url: string;
+}
+
+export interface RoundTripPairsResult {
+  source: 'google_selected_return_experimental';
+  search_status: 'pairs_found' | 'partial' | 'no_outbound' | 'no_paired_results';
+  quote_status: 'round_trip_pair_selected' | 'round_trip_return_unselected';
+  price_basis: 'google_displayed_fare_unverified';
+  party_total: null;
+  checkout_verified: false;
+  query: {
+    origin: string;
+    destination: string;
+    departure_date: string;
+    return_date: string;
+    seat_class: 'economy';
+    adults: number;
+    children: number;
+  };
+  outbound_search_url: string | null;
+  outbounds_considered: number;
+  return_searches: number;
+  pairs: SelectedRoundTripPair[];
+  cheapest_pair: SelectedRoundTripPair | null;
+  diagnostics: Array<{
+    outbound_flight: string;
+    status: 'ok' | 'failed' | 'no_match';
+    note: string;
+  }>;
+  notes: string[];
 }
 
 // =============================================================================
