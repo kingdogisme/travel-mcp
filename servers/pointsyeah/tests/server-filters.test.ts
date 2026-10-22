@@ -85,6 +85,20 @@ describe('applyResultFilters', () => {
     expect(filtered).toEqual([]);
   });
 
+  it('does not treat upstream 9999 as two confirmed seats', () => {
+    const original = result({ routes: [route({ seats: 9999, miles: 30000 }), route({ seats: 2, miles: 40000 })] });
+    const stats: { unverifiedSeatOptions?: number } = {};
+    const leads = applyResultFilters([original], BASE, stats);
+    expect(leads[0].routes?.map((entry) => entry.payment?.seats)).toEqual([null, 2]);
+    expect(stats.unverifiedSeatOptions).toBe(1);
+    expect(original.routes?.[0].payment?.seats).toBe(9999);
+
+    const confirmed = applyResultFilters([original], { ...BASE, minSeats: 2 });
+    expect(confirmed[0].routes?.map((entry) => entry.payment?.seats)).toEqual([2]);
+    const onlyUnknown = result({ routes: [route({ seats: 9999 })] });
+    expect(applyResultFilters([onlyUnknown], { ...BASE, minSeats: 2 })).toEqual([]);
+  });
+
   it('applies miles, tax, seats and stop caps', () => {
     const results = [result({ routes: [route({ miles: 90000, tax: 300, seats: 1 })] })];
     expect(applyResultFilters(results, { ...BASE, maxMiles: 80000 })).toEqual([]);
