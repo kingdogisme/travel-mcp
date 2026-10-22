@@ -26,6 +26,7 @@ import type { PlaywrightSearchDeps } from './pointsyeah-client/lib/search.js';
 import { fetchSearchResults } from './pointsyeah-client/lib/fetch-results.js';
 import { getSearchHistory } from './pointsyeah-client/lib/user-api.js';
 import { logDebug, logWarning } from './logging.js';
+import { normalizeAwardSeatCount, sanitizeAwardSeatFields, UNKNOWN_SEAT_NOTE } from './award-seats.js';
 import {
   API2_BASE,
   LIVE_BASE,
@@ -245,8 +246,9 @@ function routePassesFilters(route: FlightRoute, params: FlightSearchParams): boo
   if (params.maxTax !== undefined && (payment === null || payment.tax > params.maxTax)) {
     return false;
   }
-  if (params.minSeats !== undefined && (payment === null || payment.seats < params.minSeats)) {
-    return false;
+  if (params.minSeats !== undefined) {
+    const seats = normalizeAwardSeatCount(payment?.seats);
+    if (seats === null || seats < params.minSeats) return false;
   }
   if (params.maxStops !== undefined && segments.length - 1 > params.maxStops) {
     return false;
@@ -308,7 +310,8 @@ export function applyResultFilters(
   params: FlightSearchParams,
   stats?: { droppedByCabin?: number }
 ): FlightResult[] {
-  let scoped = results;
+  // Direct callers must not bypass the unknown-seat normalization.
+  let scoped = sanitizeAwardSeatFields(results).value;
   const programs = (params.airlineProgram ?? []).filter(
     (value) => !PROGRAM_PSEUDO_VALUES.includes(value)
   );
@@ -411,12 +414,25 @@ function toAwardDateOption(result: FlightResult, route: FlightRoute): AwardDateO
     miles: payment.miles,
     tax: payment.tax,
     cabin: payment.cabin,
-    seats: payment.seats,
+    seats: normalizeAwardSeatCount(payment.seats),
     stops: (route.segments?.length ?? 1) - 1,
     itinerary: awardItinerary(route),
   };
 }
 
+/** Sanitize Explorer JSON (which uses result.seats, not payment.seats). */
+function annotateExplorerSeatCounts<T extends Record<string, unknown>>(payload: T, source: string): T {
+  const normalized = sanitizeAwardSeatFields(payload);
+  if (normalized.unverified === 0) return normalized.value;
+  logWarning('award-seats', `${source}: normalized ${normalized.unverified} unverified seat count(s)`);
+  const previous = Array.isArray(normalized.value.notes)
+    ? normalized.value.notes.filter((note): note is string => typeof note === 'string')
+    : [];
+  return {
+    ...normalized.value,
+    notes: [...previous, `${normalized.unverified} result(s): ${UNKNOWN_SEAT_NOTE}`],
+  };
+}
 // =============================================================================
 // CLIENT IMPLEMENTATION
 // =============================================================================
@@ -557,11 +573,16 @@ export class PointsYeahClient implements IPointsYeahClient {
       logWarning('search', `Search timed out after ${MAX_POLLS} polls`);
     }
 
-    const unfiltered = Array.from(allResults.values());
+    const normalized = sanitizeAwardSeatFields(Array.from(allResults.values()));
+    const unfiltered = normalized.value;
     const stats: { droppedByCabin?: number } = {};
     const results = applyResultFilters(unfiltered, resolved, stats);
 
     const notes: string[] = [];
+    if (normalized.unverified > 0) {
+      logWarning('award-seats', `Live search normalized ${normalized.unverified} unverified seat count(s)`);
+      notes.push(`${normalized.unverified} award route(s) had an unverified seat count. ${UNKNOWN_SEAT_NOTE}`);
+    }
     if (stats.droppedByCabin) {
       notes.push(
         `${stats.droppedByCabin} award option(s) in other cabins were hidden locally — PointsYeah does not apply the cabin filter server-side.`
@@ -583,13 +604,17 @@ export class PointsYeahClient implements IPointsYeahClient {
   // --- Explorer (award map), on api2 ---
 
   async exploreAwardRoutes(body: Record<string, unknown>): Promise<AwardExplorerResult> {
-    return this.withAuth((idToken) => api2Post<AwardExplorerResult>('/explorer/search', body, idToken));
+    const payload = await this.withAuth((idToken) =>
+      api2Post<AwardExplorerResult>('/explorer/search', body, idToken)
+    );
+    return annotateExplorerSeatCounts(payload, 'explorer/search');
   }
 
   async exploreAwardAggregate(body: Record<string, unknown>): Promise<AwardExplorerResult> {
-    return this.withAuth((idToken) =>
+    const payload = await this.withAuth((idToken) =>
       api2Post<AwardExplorerResult>('/explorer/search/aggregate', body, idToken)
     );
+    return annotateExplorerSeatCounts(payload, 'explorer/search/aggregate');
   }
 
   async exploreAwardCount(): Promise<{ count: number }> {
@@ -597,9 +622,10 @@ export class PointsYeahClient implements IPointsYeahClient {
   }
 
   async exploreAwardRecommend(body: Record<string, unknown>): Promise<Record<string, unknown>> {
-    return this.withAuth((idToken) =>
+    const payload = await this.withAuth((idToken) =>
       api2Post<Record<string, unknown>>('/explorer/recommend', body, idToken)
     );
+    return annotateExplorerSeatCounts(payload, 'explorer/recommend');
   }
 
   async exploreFilterRange(body: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -783,7 +809,7 @@ export class PointsYeahClient implements IPointsYeahClient {
         ? [...allDates].sort((a, b) => a.date.localeCompare(b.date))
         : [...allDates].sort((a, b) => a.miles - b.miles || a.date.localeCompare(b.date));
 
-    const notes: string[] = [];
+    const notes: string[] = [...results.notes];
     if (allDates.length <= 1) {
       notes.push(
         'PointsYeah only priced a single date in this window — the flexible-date search found no other days with award space.'

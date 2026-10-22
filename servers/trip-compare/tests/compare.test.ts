@@ -645,3 +645,40 @@ describe('trip type', () => {
     expect(calls.awardTripTypes).toEqual(['1']);
   });
 });
+
+describe('PointsYeah unverified seat inventory', () => {
+  it('does not treat 9999 as two confirmed award seats', async () => {
+    const { client } = makeClient({ awards: awardResult({ seats: 9999 }) });
+    const result = await client.comparePointsVsCash({ ...BASE, adults: 2 });
+
+    expect(result.points.options).toHaveLength(1);
+    expect(result.points.options[0].source).toBe('pointsyeah');
+    expect(result.points.options[0].seats).toBeNull();
+    expect(result.verdict.award_search_status).toBe('seats_unverified');
+    expect(result.verdict.recommendation).toBe('insufficient_data');
+    expect(result.verdict.reason).toMatch(/could not be confirmed/i);
+  });
+
+  it('keeps mixed unknown and one-seat awards as unverified, not sold out', async () => {
+    const awards = awardResult({ seats: 9999 });
+    const existing = awards.results[0].routes![0];
+    awards.results[0].routes!.push({
+      ...existing,
+      payment: { ...existing.payment!, seats: 1, miles: 85000 },
+    });
+    const { client } = makeClient({ awards });
+    const result = await client.comparePointsVsCash({ ...BASE, adults: 2 });
+
+    expect(result.points.options.map((option) => option.seats)).toContain(null);
+    expect(result.points.options.map((option) => option.seats)).toContain(1);
+    expect(result.verdict.award_search_status).toBe('seats_unverified');
+    expect(result.verdict.recommendation).toBe('insufficient_data');
+  });
+
+  it('preserves the legitimate 9-seat result for a two-person search', async () => {
+    const { client } = makeClient({ awards: awardResult({ seats: 9 }) });
+    const result = await client.comparePointsVsCash({ ...BASE, adults: 2 });
+    expect(result.points.options[0].seats).toBe(9);
+    expect(result.verdict.award_search_status).toBe('awards_found');
+  });
+});
