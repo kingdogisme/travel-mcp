@@ -45,7 +45,7 @@ This tool searches PointsYeah for live flight availability using points and mile
 
 **Note:** A typical live search takes 30-90 seconds. Slow searches stop before the Vercel function limit and explicitly return completion_status=partial_timeout or partial_error with PARTIAL results; this is not proof that no other awards exist. The results may include alternate airports in the same city (for example HND and NRT).
 
-**Narrowing a search:** pass banks / airlineProgram to search fewer programs, set multiday with departDateTo for a flexible date range, or set transferBonusOnly to see only options that currently have a bank transfer bonus. Result-side filters (maxMiles, maxTax, maxStops, minSeats, maxLayoverMinutes, excludeRedeye) trim the response locally after the search. `limit` caps program/date GROUPS, not individual flights. `maxOptions` (default 40 for the MCP tool) caps the total individual itineraries shown. A 9999 seat count is unverified, not 9999 bookable awards; unknown inventory never passes minSeats.`;
+**Narrowing a search:** pass banks / airlineProgram to search fewer programs, set multiday with departDateTo for a flexible date range, or set transferBonusOnly to see only options that currently have a bank transfer bonus. Result-side filters (maxMiles, maxTax, maxStops, minSeats, maxLayoverMinutes, excludeRedeye) trim the response locally after the search. limit caps program/date GROUPS, not individual flights. maxOptions (default 40 for the MCP tool) caps the total individual itineraries shown. A 9999 seat count is unverified, not 9999 bookable awards; unknown inventory never passes minSeats.`;
 
 function formatDuration(minutes: number): string {
   const hours = Math.floor(minutes / 60);
