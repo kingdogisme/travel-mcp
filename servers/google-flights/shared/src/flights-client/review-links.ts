@@ -164,7 +164,8 @@ export function buildExactRoundTripReviewLink(options: {
     seat: CABINS[options.seat_class],
     trip: 1,
     markerFourteen: 1,
-    pin: { value: '18446744073709551615' },
+    // uint64 max represented by low/high 32-bit words (avoid JS precision loss).
+    pin: { value: { low: 0xffffffff, high: 0xffffffff, unsigned: true } },
   };
   return url('booking', encode(payload), options.currency);
 }
