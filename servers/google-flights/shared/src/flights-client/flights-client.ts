@@ -1,4 +1,5 @@
 import protobuf from 'protobufjs';
+import { buildMultiCityResearchLink } from './review-links.js';
 import type {
   FlightOffer,
   FlightSegment,
@@ -1453,10 +1454,28 @@ export async function searchMultiCity(
     };
   }
 
+  let jointResearchUrl: string | null = null;
+  try {
+    jointResearchUrl = buildMultiCityResearchLink({
+      legs: legs.map((entry) => entry.leg),
+      adults: options.adults,
+      children: options.children,
+      infants_in_seat: options.infants_in_seat,
+      infants_on_lap: options.infants_on_lap,
+      seat_class: options.seat_class,
+      currency: options.currency,
+    });
+  } catch {
+    // A failed/unresolved route must not suppress any independently priced leg.
+    // Do not manufacture a joint Google URL from guessed airports.
+  }
   const notes = [
     'This is a sum of INDEPENDENT ONE-WAY Google displayed fares, not an actual combined multi-city/open-jaw ticket quotation.',
     'Passenger price basis is unverified; do not multiply, divide or present the sum as a verified full-party booking price.',
     'Each leg must be verified at checkout for its own fare and availability; a joint-ticket quote requires a separate booking flow.',
+    jointResearchUrl
+      ? 'joint_research_url opens a Google MULTI-CITY search in a browser for manual investigation. It is NOT a verified joint quote; Google may not preserve every leg when opening this TFS.'
+      : 'No reliable Google multi-city research URL could be encoded for this itinerary.',
   ];
   if (coverage_status === 'partial') {
     notes.push('Some legs failed, returned no results, or lacked a trustworthy minimum. No complete split-ticket estimate is available.');
@@ -1465,6 +1484,8 @@ export async function searchMultiCity(
   return {
     pricing_mode: 'separate_one_ways',
     joint_ticket_quote: null,
+    joint_research_url: jointResearchUrl,
+    joint_research_url_status: jointResearchUrl ? 'unverified_google_ui' : 'unavailable',
     price_basis: 'google_displayed_fare_unverified',
     passengers: {
       adults: options.adults,

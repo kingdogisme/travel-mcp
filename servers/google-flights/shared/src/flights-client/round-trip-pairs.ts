@@ -7,6 +7,7 @@ import type {
   SearchFlightsResult,
   SelectedRoundTripPair,
 } from './types.js';
+import { buildExactRoundTripReviewLink } from './review-links.js';
 import {
   buildSelectionTfu,
   buildTfsParam,
@@ -188,6 +189,24 @@ export async function searchRoundTripPairs(
         continue;
       }
       for (const inbound of matches) {
+        let googleBookingPageUrl: string | null = null;
+        try {
+          googleBookingPageUrl = buildExactRoundTripReviewLink({
+            outbound: outbound.segments,
+            inbound: inbound.segments,
+            departure_date: options.departure_date,
+            return_date: options.return_date,
+            origin: outbound.segments[0].origin,
+            destination: outbound.segments[outbound.segments.length - 1].destination,
+            adults: options.adults,
+            children: options.children,
+            seat_class: options.seat_class,
+            currency: options.currency,
+          });
+        } catch {
+          // A valid matched pair remains useful even if a Google booking-page
+          // URL cannot be encoded. Never invent a link or silently hide the pair.
+        }
         pairs.push({
           outbound,
           return_flight: inbound,
@@ -197,6 +216,8 @@ export async function searchRoundTripPairs(
           price_basis: 'google_displayed_fare_unverified',
           party_total: null,
           checkout_verified: false,
+          google_booking_page_url: googleBookingPageUrl,
+          google_booking_page_status: googleBookingPageUrl ? 'encoded_unverified' : 'unavailable',
           search_url: response.search_url,
         });
       }
@@ -233,6 +254,7 @@ export async function searchRoundTripPairs(
     `Google two-stage selection EXPERIMENTAL: economy outbounds with at most ${outboundMaxStops === '1' ? 'one connection' : 'zero connections'} are pinned using every physical leg. Each returned pair contains both directions, unlike first-page round-trip reference prices.`,
     'Google display price is for the selected pair, but is NOT a confirmed booking-provider checkout quote, and the per-passenger vs full-party price basis is unverified.',
     'Do not multiply these display prices by the number of adults to claim a verified party budget. No fare is held or purchased.',
+    'google_booking_page_url is a deterministic Google review-page deep link, NOT a provider checkout URL. Confirm exact flights and full-party final price in the opened page.',
   ];
   if (candidates.length === 0) {
     notes.push('No pinnable eligible outbound option with a valid selection token was available; do not interpret this as no round-trip fares.');

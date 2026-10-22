@@ -56,6 +56,10 @@ describe('multi-city price integrity', () => {
     const response = await searchMultiCity(itinerary, searcher);
     expect(response.pricing_mode).toBe('separate_one_ways');
     expect(response.joint_ticket_quote).toBeNull();
+    expect(response.joint_research_url_status).toBe('unverified_google_ui');
+    const research = new URL(response.joint_research_url ?? '');
+    expect(research.pathname).toBe('/travel/flights/search');
+    expect(research.searchParams.has('tfs')).toBe(true);
     expect(response.price_basis).toBe('google_displayed_fare_unverified');
     expect(response.passengers.adults).toBe(2);
     expect(response.coverage_status).toBe('complete');

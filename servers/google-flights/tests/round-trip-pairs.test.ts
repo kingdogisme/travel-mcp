@@ -213,6 +213,10 @@ describe('Google round-trip pair completion', () => {
     expect(output.cheapest_pair?.displayed_round_trip_price).toBe(58);
     expect(output.cheapest_pair?.party_total).toBeNull();
     expect(output.cheapest_pair?.checkout_verified).toBe(false);
+    expect(output.cheapest_pair?.google_booking_page_status).toBe('encoded_unverified');
+    const reviewUrl = new URL(output.cheapest_pair?.google_booking_page_url ?? '');
+    expect(reviewUrl.pathname).toBe('/travel/flights/booking');
+    expect(reviewUrl.searchParams.has('tfs')).toBe(true);
     expect(output.notes.join(' ')).toMatch(/not a confirmed booking-provider/i);
   });
 
@@ -302,6 +306,9 @@ describe('Google round-trip pair completion', () => {
     expect(result.party_total).toBeNull();
     expect(result.cheapest_pair?.price_basis).toBe('google_displayed_fare_unverified');
     expect(result.cheapest_pair?.checkout_verified).toBe(false);
+    expect(result.cheapest_pair?.google_booking_page_status).toBe('encoded_unverified');
+    const deep = new URL(result.cheapest_pair?.google_booking_page_url ?? '');
+    expect(Buffer.from(deep.searchParams.get('tfs') ?? '', 'base64url').toString('latin1')).toContain('224');
     expect(result.outbounds_considered).toBe(1);
   });
 

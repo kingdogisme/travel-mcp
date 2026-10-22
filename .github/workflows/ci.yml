@@ -40,3 +40,9 @@ jobs:
         continue-on-error: true
         timeout-minutes: 4
         run: node scripts/smoke-google-connecting.mjs
+
+      - name: Google itinerary review-link read-only canary
+        if: github.event_name == 'pull_request' && github.head_ref == 'feat/google-exact-itinerary-review-links-p3'
+        continue-on-error: true
+        timeout-minutes: 2
+        run: node scripts/smoke-google-review-links.mjs
