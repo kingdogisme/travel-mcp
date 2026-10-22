@@ -11,6 +11,7 @@
  * the comparison has a gap to fill.
  */
 import { logDebug, logWarning } from './logging.js';
+import { normalizeSeatCount } from 'pointsyeah-mcp-server-shared';
 
 export const DEFAULT_SEATS_AERO_MCP_URL = 'https://seats.aero/mcp';
 
@@ -172,7 +173,7 @@ export function toSeatsAeroOption(raw: RawFlight): SeatsAeroOption | null {
     tax: money.amount,
     tax_currency: money.currency,
     duration_minutes: num(raw.duration_minutes),
-    seats: num(raw.remaining_seats),
+    seats: normalizeSeatCount(raw.remaining_seats),
     data_age_minutes: num(raw.minutes_old),
   };
 }
