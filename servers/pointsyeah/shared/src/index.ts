@@ -33,6 +33,7 @@ export {
   FindCheapestAwardDatesParamsSchema,
 } from './types.js';
 export { applyResultFilters } from './server.js';
+export { normalizeSeatCount, normalizeAwardSeatFields, UNVERIFIED_SEAT_SENTINEL } from './seat-availability.js';
 
 // State management exports
 export {
