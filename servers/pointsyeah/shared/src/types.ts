@@ -137,7 +137,14 @@ export const FlightSearchParamsSchema = z.object({
     .min(1)
     .max(200)
     .optional()
-    .describe('Cap how many results are returned'),
+    .describe('Maximum result GROUPS (loyalty program + date), not individual flights'),
+  maxOptions: z
+    .number()
+    .int()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe('Maximum individual flight itineraries across all result groups'),
 });
 
 export type FlightSearchParams = z.infer<typeof FlightSearchParamsSchema>;
@@ -198,12 +205,28 @@ export interface FlightResult {
   routes: FlightRoute[] | null;
 }
 
+export type AwardSearchCompletion = 'completed' | 'partial_timeout' | 'partial_error';
+
 export interface FlightSearchResults {
   /** Results after local filters were applied. */
   total: number;
   /** How many results PointsYeah returned before filtering. */
   unfiltered_total: number;
   results: FlightResult[];
+  /** How the upstream polling ended. Omitted only by older external mocks/clients. */
+  completion_status?: AwardSearchCompletion;
+  /** Individual flight itineraries shown, NOT the number of program/date groups. */
+  option_total?: number;
+  /** Number of itineraries in all upstream groups, before local filters. */
+  unfiltered_option_total?: number;
+  /** Itineraries matched by local filters + group limit, before maxOptions. */
+  matched_option_total?: number;
+  /** Matching itineraries omitted solely due to maxOptions. */
+  omitted_option_total?: number;
+  /** How many API polls were attempted before completion or deadline. */
+  poll_count?: number;
+  elapsed_ms?: number;
+  unverified_seat_count?: number;
   /** Caveats about the result set, e.g. options hidden because of cabin. */
   notes: string[];
 }
@@ -268,6 +291,8 @@ export interface TransferBonus {
 }
 
 export interface TransferBonusSearchResult {
+  /** A missing bonus is not proof of absence when the search is incomplete. */
+  completion_status?: AwardSearchCompletion | 'unknown';
   bonuses: TransferBonus[];
   searched: {
     origin: string;
@@ -331,6 +356,8 @@ export interface AwardDateOption {
 }
 
 export interface CheapestAwardDatesResult {
+  /** Flexible dates shown are partial if the live search never completed. */
+  completion_status?: AwardSearchCompletion | 'unknown';
   window: { from: string; to: string };
   /** Cheapest award found per calendar date. */
   dates: AwardDateOption[];

@@ -25,7 +25,9 @@ import { createSearchTask } from './pointsyeah-client/lib/search.js';
 import type { PlaywrightSearchDeps } from './pointsyeah-client/lib/search.js';
 import { fetchSearchResults } from './pointsyeah-client/lib/fetch-results.js';
 import { getSearchHistory } from './pointsyeah-client/lib/user-api.js';
-import { logDebug, logWarning } from './logging.js';
+import { logDebug, logMetric, logWarning } from './logging.js';
+import { pollAwardSearch } from './search-polling.js';
+import { countAwardItineraries, limitAwardItineraries } from './result-limits.js';
 import { normalizeAwardSeatCount, sanitizeAwardSeatFields, UNKNOWN_SEAT_NOTE } from './award-seats.js';
 import {
   API2_BASE,
@@ -424,7 +426,7 @@ function toAwardDateOption(result: FlightResult, route: FlightRoute): AwardDateO
 function annotateExplorerSeatCounts<T extends Record<string, unknown>>(payload: T, source: string): T {
   const normalized = sanitizeAwardSeatFields(payload);
   if (normalized.unverified === 0) return normalized.value;
-  logWarning('award-seats', `${source}: normalized ${normalized.unverified} unverified seat count(s)`);
+  logMetric('pointsyeah.award_seats_normalized', { source, unverified_seats: normalized.unverified });
   const previous = Array.isArray(normalized.value.notes)
     ? normalized.value.notes.filter((note): note is string => typeof note === 'string')
     : [];
@@ -505,7 +507,15 @@ export class PointsYeahClient implements IPointsYeahClient {
   }
 
   async searchFlights(params: FlightSearchParams): Promise<FlightSearchResults> {
-    // PointsYeah only accepts IATA codes, so city names are resolved here.
+    const startedAt = Date.now();
+    // Vercel's PointsYeah function is capped at 300 seconds. Leave at least
+    // 60 seconds for cleanup, formatting, network jitter and the JSON-RPC reply.
+    // This clock STARTS before auth and Playwright, not after creating the task.
+    const SEARCH_BUDGET_MS = 210_000;
+    const deadlineMs = startedAt + SEARCH_BUDGET_MS;
+
+    // The caller may explicitly request an airport; we intentionally preserve
+    // PointsYeah's same-city alternate-airport results (e.g. HND/NRT).
     const resolved: FlightSearchParams = {
       ...params,
       departure: resolvePlaceCode(params.departure),
@@ -513,11 +523,8 @@ export class PointsYeahClient implements IPointsYeahClient {
     };
     const tokens = await this.ensureTokens();
 
-    // Step 1: Create search task via Playwright (handles encrypted request).
-    // Note: createSearchTask doesn't use withAuth() because it passes tokens as browser
-    // cookies to the PointsYeah website, not as API headers. A 401 retry would require
-    // re-launching the browser. The 5-minute refresh buffer in ensureTokens() mitigates
-    // the risk of token expiry between refresh and browser navigation.
+    // The encrypted task request is built in Playwright; do not log cookies
+    // or the upstream task ID in structured production metrics.
     const task = await createSearchTask(
       resolved,
       tokens.accessToken,
@@ -526,73 +533,78 @@ export class PointsYeahClient implements IPointsYeahClient {
       this.playwright
     );
 
-    // Step 2: Poll for results until search is done.
-    // Results arrive in batches across polls, so we accumulate them.
-    const POLL_INTERVAL_MS = 3000;
-    const MAX_POLLS = 120; // Up to 6 minutes of polling
-    const allResults = new Map<string, FlightResult>();
-    let done = false;
-
-    for (let i = 0; i < MAX_POLLS; i++) {
-      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
-
-      const pollResponse = await this.withAuth((idToken) =>
+    const polling = await pollAwardSearch({
+      deadlineMs,
+      intervalMs: 3000,
+      // fetchSearchResults can take 30s; reserve a little extra for auth
+      // refresh + network scheduling instead of starting an unsafe final poll.
+      requestGuardMs: FETCH_TIMEOUT_MS + 5_000,
+      maxPolls: 120,
+      poll: () => this.withAuth((idToken) =>
         fetchSearchResults(task.task_id, idToken)
-      );
+      ),
+      onProgress: (polls, status, total) =>
+        logDebug('search', `Poll ${polls}: upstream_status=${status}, ${total} groups accumulated`),
+    });
 
-      if (!pollResponse.success) {
-        throw new Error(`Search polling failed (code: ${pollResponse.code})`);
-      }
-
-      // Guard against null/undefined data envelope from API
-      const pollData = pollResponse.data;
-      if (!pollData) {
-        logWarning('search', `Poll ${i + 1}: response.data is null/undefined, skipping`);
-        continue;
-      }
-
-      // Accumulate results using program+date+departure+arrival as key
-      const pollResults = pollData.result ?? [];
-      for (const result of pollResults) {
-        const key = `${result.code}-${result.date}-${result.departure}-${result.arrival}`;
-        allResults.set(key, result);
-      }
-
-      logDebug(
-        'search',
-        `Poll ${i + 1}: status=${pollData.status}, ${pollResults.length} results this poll, ${allResults.size} total`
-      );
-
-      if (pollData.status === 'done') {
-        done = true;
-        break;
-      }
-    }
-
-    if (!done) {
-      logWarning('search', `Search timed out after ${MAX_POLLS} polls`);
-    }
-
-    const normalized = sanitizeAwardSeatFields(Array.from(allResults.values()));
+    const normalized = sanitizeAwardSeatFields(polling.results);
     const unfiltered = normalized.value;
     const stats: { droppedByCabin?: number } = {};
-    const results = applyResultFilters(unfiltered, resolved, stats);
+    const matching = applyResultFilters(unfiltered, resolved, stats);
+    const matchedOptionCount = countAwardItineraries(matching);
+    const capped = limitAwardItineraries(matching, resolved.maxOptions);
+    const results = capped.results;
+    const optionCount = countAwardItineraries(results);
+    const elapsedMs = Date.now() - startedAt;
 
     const notes: string[] = [];
+    if (polling.completion !== 'completed') {
+      notes.push(
+        polling.completion === 'partial_timeout'
+          ? `Search reached its ${Math.round(SEARCH_BUDGET_MS / 1000)}s safe time budget after ${polling.polls} polls. Results are PARTIAL and must not be treated as evidence that other programs have no award space.`
+          : 'The upstream search failed before reporting completion. Returned award records are PARTIAL research leads, not a verified complete search.'
+      );
+    }
     if (normalized.unverified > 0) {
-      logWarning('award-seats', `Live search normalized ${normalized.unverified} unverified seat count(s)`);
-      notes.push(`${normalized.unverified} award route(s) had an unverified seat count. ${UNKNOWN_SEAT_NOTE}`);
+      notes.push(`${normalized.unverified} reported seat value(s) were unverified and normalized to unknown. ${UNKNOWN_SEAT_NOTE}`);
     }
     if (stats.droppedByCabin) {
       notes.push(
         `${stats.droppedByCabin} award option(s) in other cabins were hidden locally — PointsYeah does not apply the cabin filter server-side.`
       );
     }
+    if (capped.omitted_options > 0) {
+      notes.push(
+        `Output capped at ${optionCount} individual flight itinerary/itineraries by maxOptions; ${capped.omitted_options} additional matching itinerary/itineraries were omitted. Raise maxOptions (up to 200) to inspect more.`
+      );
+    }
+
+    logMetric('pointsyeah.search', {
+      completion: polling.completion,
+      elapsed_ms: elapsedMs,
+      polls: polling.polls,
+      groups_raw: unfiltered.length,
+      itineraries_raw: countAwardItineraries(unfiltered),
+      groups_shown: results.length,
+      itineraries_shown: optionCount,
+      itineraries_matched: matchedOptionCount,
+      itineraries_omitted: capped.omitted_options,
+      invalid_seat_values: normalized.unverified,
+      mismatched_cabin_options: stats.droppedByCabin ?? 0,
+    });
 
     return {
       total: results.length,
       unfiltered_total: unfiltered.length,
       results,
+      completion_status: polling.completion,
+      option_total: optionCount,
+      unfiltered_option_total: countAwardItineraries(unfiltered),
+      matched_option_total: matchedOptionCount,
+      omitted_option_total: capped.omitted_options,
+      poll_count: polling.polls,
+      elapsed_ms: elapsedMs,
+      unverified_seat_count: normalized.unverified,
       notes,
     };
   }
@@ -730,14 +742,20 @@ export class PointsYeahClient implements IPointsYeahClient {
       .sort((a, b) => b.bonus_percentage - a.bonus_percentage || a.bank.localeCompare(b.bank))
       .slice(0, params.limit);
 
-    const notes: string[] = [];
+    const notes: string[] = [...results.notes];
     if (bonuses.length === 0) {
       notes.push(
-        'No live transfer bonuses showed up on this route. Bonuses are bank-wide, so try a busier route or a different date to surface them.'
+        results.completion_status && results.completion_status !== 'completed'
+          ? 'The live search did not finish, so transfer-bonus coverage is INCOMPLETE and a missing bonus does not imply none exists.'
+          : 'No live transfer bonuses showed up on this route. Bonuses are bank-wide, so try a busier route or a different date to surface them.'
       );
     }
     if (results.unfiltered_total === 0) {
-      notes.push('PointsYeah returned no award results for this route, so no bonuses could be read.');
+      notes.push(
+        results.completion_status && results.completion_status !== 'completed'
+          ? 'Search ended incomplete without award data; cannot determine transfer-bonus availability.'
+          : 'PointsYeah returned no award results for this route, so no bonuses could be read.'
+      );
     }
 
     return {
@@ -751,6 +769,7 @@ export class PointsYeahClient implements IPointsYeahClient {
       },
       total_results: results.total,
       unfiltered_total: results.unfiltered_total,
+      completion_status: results.completion_status ?? 'unknown',
       notes,
     };
   }
@@ -812,7 +831,9 @@ export class PointsYeahClient implements IPointsYeahClient {
     const notes: string[] = [...results.notes];
     if (allDates.length <= 1) {
       notes.push(
-        'PointsYeah only priced a single date in this window — the flexible-date search found no other days with award space.'
+        results.completion_status && results.completion_status !== 'completed'
+          ? 'The flexible-date search was incomplete; missing dates must not be treated as lacking award space.'
+          : 'PointsYeah only priced a single date in this window — the flexible-date search found no other days with award space.'
       );
     }
     if (allDates.length > 0) {
@@ -836,6 +857,7 @@ export class PointsYeahClient implements IPointsYeahClient {
       searched_dates: Array.from(new Set(results.results.map((result) => result.date))).sort(),
       total_results: results.total,
       unfiltered_total: results.unfiltered_total,
+      completion_status: results.completion_status ?? 'unknown',
       notes,
     };
   }
