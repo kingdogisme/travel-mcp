@@ -178,7 +178,8 @@ export interface FlightPayment {
   miles: number;
   cabin: string;
   unit: string;
-  seats: number;
+  /** Null when the upstream inventory count is unverified (e.g. 9999). */
+  seats: number | null;
   cash_price: number;
 }
 
@@ -323,7 +324,8 @@ export interface AwardDateOption {
   miles: number;
   tax: number;
   cabin: string;
-  seats: number;
+  /** Null if the award seat count could not be verified. */
+  seats: number | null;
   stops: number;
   itinerary: string;
 }
