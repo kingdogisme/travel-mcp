@@ -352,6 +352,32 @@ describe('comparePointsVsCash verdicts', () => {
     expect(result.verdict.reason).toContain('only offers 1 seat(s) for 2 traveller(s)');
   });
 
+  it('marks a 9999-seat award as unverified, not bookable for two adults', async () => {
+    const { client } = makeClient({ awards: awardResult({ seats: 9999 }) });
+    const value = await client.comparePointsVsCash({ ...BASE, adults: 2 });
+    expect(value.points.options).toHaveLength(1);
+    expect(value.points.options[0].seats).toBeNull();
+    expect(value.points.search_status).toBe('seats_unverified');
+    expect(value.verdict.recommendation).toBe('insufficient_data');
+    expect(value.verdict.best_award_program).toBeNull();
+    expect(value.verdict.reason).toContain('unverified seat availability');
+  });
+
+  it('does not declare all awards insufficient when some counts are unknown', async () => {
+    const mixed = awardResult({ seats: 1 });
+    const first = mixed.results[0].routes![0];
+    mixed.results[0].routes!.push({
+      ...first,
+      payment: { ...first.payment!, miles: 65000, seats: 9999 },
+    });
+    const { client } = makeClient({ awards: mixed });
+    const value = await client.comparePointsVsCash({ ...BASE, adults: 2 });
+    expect(value.points.options).toHaveLength(2);
+    expect(value.points.options.some((item) => item.seats === null)).toBe(true);
+    expect(value.points.search_status).toBe('seats_unverified');
+    expect(value.verdict.recommendation).toBe('insufficient_data');
+  });
+
   it('keeps the comparison going when the award side errors, and says so', async () => {
     const { client } = makeClient({ awardThrows: true });
     const result = await client.comparePointsVsCash(BASE);
