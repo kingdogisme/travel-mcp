@@ -84,7 +84,9 @@ export const SearchAnywhereSchema = z.object({
 export function searchAnywhereTool(_server: Server, clientFactory: FlightsClientFactory) {
   return {
     name: 'search_anywhere',
-    description: `Find the cheapest places to go from one origin: price a set of candidate destinations and rank them.
+    description: `WARNING: 'cheapest' is a ranking of Google-displayed fare leads, not a confirmed ticket price. Round-trip results reflect only outbound selection; return flights are not chosen. Price basis and all-passenger totals are unverified.
+
+Find the cheapest places to go from one origin: price a set of candidate destinations and rank them.
 
 Give candidates either explicitly (destinations: ["NRT", "Bangkok", "LIS,OPO"]) or as regions that get expanded into their airports (regions: ["Japan", "Thailand", "Hawaii"]); a region that is a big multi-airport city resolves to its metro code ("London" -> LON). Each candidate is one one-way or round-trip search on the given dates (round trips need return_date), so the response is comparable: price, airline, stops, duration and times per destination, ordered cheapest first (or fastest first with sort_by: "duration").
 

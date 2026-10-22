@@ -55,7 +55,14 @@ function cashResult(price = 2000): SearchFlightsResult {
     has_more: false,
     next_offset: null,
     search_url: 'https://www.google.com/travel/flights?tfs=abc',
-    query: { origin: 'SFO', destination: 'LHR' },
+    quote_status: 'indicative_one_way',
+    price_basis: 'google_displayed_fare_unverified',
+    party_total: null,
+    checkout_verified: false,
+    query: {
+      origin: 'SFO', destination: 'LHR', trip_type: 'one_way', cabin_honored: true,
+      passengers: { adults: 1, children: 0, infants_in_seat: 0, infants_on_lap: 0 },
+    },
     notes: [],
     price_insights: { level: 'typical', range_low: 1800, range_high: 2400 },
   } as unknown as SearchFlightsResult;
@@ -223,7 +230,14 @@ function makeClient(config: {
     },
     async getDateGrid() {
       calls.gridCalls += 1;
-      return { cheapest: config.gridCheapest ?? null };
+      return {
+        cheapest: config.gridCheapest ?? null,
+        quote_status: 'indicative_one_way',
+        price_basis: 'google_displayed_fare_unverified',
+        party_total: null,
+        checkout_verified: false,
+        cabin_honored: true,
+      };
     },
   } as unknown as IFlightsClient;
   const pointsYeah = {
@@ -291,6 +305,10 @@ describe('comparePointsVsCash verdicts', () => {
     expect(result.cash.cheapest?.price).toBe(2000);
     expect(result.cash.search_status).toBe('fares_found');
     expect(result.cash.search_error).toBeNull();
+    expect(result.cash.usable_for_valuation).toBe(true);
+    expect(result.cash.comparable_price).toBe(2000);
+    expect(result.cash.party_total).toBeNull();
+    expect(result.cash.checkout_verified).toBe(false);
     expect(result.cash.price_insights_level).toBe('typical');
     expect(result.cash.price_history_low).toBe(1800);
   });
@@ -322,10 +340,10 @@ describe('comparePointsVsCash verdicts', () => {
     expect(result.points.options).toHaveLength(0);
   });
 
-  it('keeps the award when no cash fare comes back, without claiming cash is impossible', async () => {
+  it('keeps the award lead when no cash fare comes back, without claiming points win', async () => {
     const { client } = makeClient({ cash: null });
     const result = await client.comparePointsVsCash(BASE);
-    expect(result.verdict.recommendation).toBe('points');
+    expect(result.verdict.recommendation).toBe('insufficient_data');
     expect(result.cash.search_status).toBe('no_fares_returned');
     expect(result.cash.search_error).toBeNull();
     expect(result.verdict.reason).toContain('not proof no cash fare exists');
@@ -339,17 +357,18 @@ describe('comparePointsVsCash verdicts', () => {
     const result = await client.comparePointsVsCash(BASE);
     expect(result.cash.search_status).toBe('search_failed');
     expect(result.cash.search_error).toContain('cash boom');
-    expect(result.verdict.recommendation).toBe('points');
-    expect(result.verdict.reason).toContain('not checked');
+    expect(result.verdict.recommendation).toBe('insufficient_data');
+    expect(result.verdict.reason).toContain('no comparable cash price');
   });
 
   it('ignores award options that cannot seat the party', async () => {
     const { client } = makeClient({ awards: awardResult({ seats: 1 }) });
     const result = await client.comparePointsVsCash({ ...BASE, adults: 2 });
     expect(result.points.options).toHaveLength(1);
-    expect(result.verdict.recommendation).toBe('cash');
+    expect(result.verdict.recommendation).toBe('insufficient_data');
+    expect(result.cash.search_status).toBe('fares_unverified');
     expect(result.verdict.award_search_status).toBe('seats_insufficient');
-    expect(result.verdict.reason).toContain('only offers 1 seat(s) for 2 traveller(s)');
+    expect(result.verdict.reason).toContain('not a comparable completed ticket price');
   });
 
   it('keeps the comparison going when the award side errors, and says so', async () => {
@@ -637,11 +656,138 @@ describe('trip type', () => {
     const result = await client.comparePointsVsCash({ ...BASE, returnDate: '2026-11-25' });
     expect(calls.awardTripTypes).toEqual(['2']);
     expect(result.route.return_date).toBe('2026-11-25');
+    expect(result.cash.search_status).toBe('fares_unverified');
+    expect(result.cash.usable_for_valuation).toBe(false);
+    expect(result.cash.comparable_price).toBeNull();
+    expect(result.verdict.cents_per_point).toBeNull();
+    expect(result.verdict.recommendation).toBe('insufficient_data');
   });
 
   it('treats a missing return date as one-way', async () => {
     const { client, calls } = makeClient({});
     await client.comparePointsVsCash(BASE);
     expect(calls.awardTripTypes).toEqual(['1']);
+  });
+});
+
+describe('PointsYeah unverified seat inventory', () => {
+  it('does not treat 9999 as two confirmed award seats', async () => {
+    const { client } = makeClient({ awards: awardResult({ seats: 9999 }) });
+    const result = await client.comparePointsVsCash({ ...BASE, adults: 2 });
+
+    expect(result.points.options).toHaveLength(1);
+    expect(result.points.options[0].source).toBe('pointsyeah');
+    expect(result.points.options[0].seats).toBeNull();
+    expect(result.verdict.award_search_status).toBe('seats_unverified');
+    expect(result.verdict.recommendation).toBe('insufficient_data');
+    expect(result.verdict.reason).toMatch(/could not be confirmed/i);
+  });
+
+  it('keeps mixed unknown and one-seat awards as unverified, not sold out', async () => {
+    const awards = awardResult({ seats: 9999 });
+    const existing = awards.results[0].routes![0];
+    awards.results[0].routes!.push({
+      ...existing,
+      payment: { ...existing.payment!, seats: 1, miles: 85000 },
+    });
+    const { client } = makeClient({ awards });
+    const result = await client.comparePointsVsCash({ ...BASE, adults: 2 });
+
+    expect(result.points.options.map((option) => option.seats)).toContain(null);
+    expect(result.points.options.map((option) => option.seats)).toContain(1);
+    expect(result.verdict.award_search_status).toBe('seats_unverified');
+    expect(result.verdict.recommendation).toBe('insufficient_data');
+  });
+
+  it('preserves the legitimate 9-seat result for a two-person search', async () => {
+    const { client } = makeClient({ awards: awardResult({ seats: 9 }) });
+    const result = await client.comparePointsVsCash({ ...BASE, adults: 2 });
+    expect(result.points.options[0].seats).toBe(9);
+    expect(result.verdict.award_search_status).toBe('awards_found');
+  });
+});
+
+describe('cash fare provenance gates', () => {
+  it('returns insufficient_data for two passengers even with a plausible display price and award seats', async () => {
+    const { client } = makeClient({ awards: awardResult({ seats: 9 }) });
+    const response = await client.comparePointsVsCash({ ...BASE, adults: 2 });
+    expect(response.cash.cheapest?.price).toBe(2000);
+    expect(response.cash.quote_status).toBe('indicative_one_way');
+    expect(response.cash.search_status).toBe('fares_unverified');
+    expect(response.cash.comparable_price).toBeNull();
+    expect(response.points.options[0].cents_per_point).toBeNull();
+    expect(response.verdict.cents_per_point).toBeNull();
+    expect(response.verdict.recommendation).toBe('insufficient_data');
+  });
+
+  it('rejects an actual outbound-only round-trip display even if its number looks cheap', async () => {
+    const outboundOnly = {
+      ...cashResult(48),
+      quote_status: 'round_trip_return_unselected' as const,
+      query: {
+        ...cashResult().query,
+        trip_type: 'round_trip',
+        return_date: '2026-11-25',
+      },
+    };
+    const { client } = makeClient({ cash: outboundOnly });
+    const response = await client.comparePointsVsCash({ ...BASE, returnDate: '2026-11-25' });
+    expect(response.cash.cheapest?.price).toBe(48);
+    expect(response.cash.quote_status).toBe('round_trip_return_unselected');
+    expect(response.cash.comparable_price).toBeNull();
+    expect(response.cash.search_status).toBe('fares_unverified');
+    expect(response.points.options.every((option) => option.cents_per_point === null)).toBe(true);
+    expect(response.verdict.recommendation).toBe('insufficient_data');
+  });
+
+  it('fails closed for legacy clients that omit quote-stage metadata', async () => {
+    const legacy = {
+      ...cashResult(),
+      quote_status: undefined as never,
+      price_basis: undefined as never,
+    };
+    const { client } = makeClient({ cash: legacy });
+    const response = await client.comparePointsVsCash(BASE);
+    expect(response.cash.quote_status).toBe('unknown');
+    expect(response.cash.price_basis).toBe('unknown');
+    expect(response.cash.comparable_price).toBeNull();
+    expect(response.verdict.recommendation).toBe('insufficient_data');
+  });
+
+  it('does not value another cabin if Google ignored the requested cabin filter', async () => {
+    const result = cashResult(1800);
+    result.query.cabin_honored = false;
+    const { client } = makeClient({ cash: result });
+    const response = await client.comparePointsVsCash(BASE);
+    expect(response.cash.search_status).toBe('fares_unverified');
+    expect(response.verdict.recommendation).toBe('insufficient_data');
+    expect(response.verdict.cents_per_point).toBeNull();
+  });
+
+  it('does not let an unverified round-trip date grid pick the comparison day', async () => {
+    const { client, calls } = makeClient({
+      gridCheapest: { date: '2026-11-21', price: 48, airline: 'Frontier' },
+    });
+    const response = await client.comparePointsVsCash({
+      ...BASE, departDateTo: '2026-11-25', returnDate: '2026-11-27',
+    });
+    expect(response.window?.cash).toBeNull();
+    expect(response.window?.compared_date).toBe(BASE.departDate);
+    expect(response.window?.note).toContain('No comparable cash date-grid quote');
+    expect(calls.cashDates).toEqual([BASE.departDate]);
+    expect(response.verdict.recommendation).toBe('insufficient_data');
+  });
+
+  it('does not allow a two-adult date grid to set comparison date from an ambiguous price', async () => {
+    const { client } = makeClient({
+      gridCheapest: { date: '2026-11-21', price: 760, airline: 'American' },
+      awards: awardResult({ seats: 9 }),
+    });
+    const response = await client.comparePointsVsCash({
+      ...BASE, adults: 2, departDateTo: '2026-11-25',
+    });
+    expect(response.window?.cash).toBeNull();
+    expect(response.window?.compared_date).toBe(BASE.departDate);
+    expect(response.verdict.cents_per_point).toBeNull();
   });
 });

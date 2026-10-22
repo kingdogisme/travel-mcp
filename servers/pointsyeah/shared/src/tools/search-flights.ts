@@ -2,6 +2,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import type { IPointsYeahClient } from '../server.js';
 import { FlightSearchParamsSchema } from '../types.js';
 import type { FlightResult, FlightRoute } from '../types.js';
+import { normalizeAwardSeatCount } from '../award-seats.js';
 
 const PARAM_DESCRIPTIONS = {
   departure:
@@ -44,7 +45,7 @@ This tool searches PointsYeah for live flight availability using points and mile
 
 **Note:** This performs a live search that may take 30-90 seconds to complete as it queries multiple airline programs in real time.
 
-**Narrowing a search:** pass banks / airlineProgram to search fewer programs, set multiday with departDateTo for a flexible date range, or set transferBonusOnly to see only options that currently have a bank transfer bonus. Result-side filters (maxMiles, maxTax, maxStops, minSeats, maxLayoverMinutes, excludeRedeye) trim the response locally after the search.`;
+**Narrowing a search:** pass banks / airlineProgram to search fewer programs, set multiday with departDateTo for a flexible date range, or set transferBonusOnly to see only options that currently have a bank transfer bonus. Result-side filters (maxMiles, maxTax, maxStops, minSeats, maxLayoverMinutes, excludeRedeye) trim the response locally after the search. A 9999 seat count is unverified, not 9999 bookable awards; unknown inventory never passes minSeats.`;
 
 function formatDuration(minutes: number): string {
   const hours = Math.floor(minutes / 60);
@@ -59,8 +60,10 @@ function formatRoute(route: FlightRoute): string {
   const { payment, segments, transfer } = route;
 
   if (payment) {
+    const seats = normalizeAwardSeatCount(payment.seats);
+    const seatLabel = seats === null ? 'seat count unverified' : `${seats} seat(s)`;
     lines.push(
-      `  ${payment.miles.toLocaleString()} ${payment.unit} + $${payment.tax.toFixed(2)} tax | ${payment.cabin} | ${payment.seats} seat(s)`
+      `  ${payment.miles.toLocaleString()} ${payment.unit} + ${payment.tax.toFixed(2)} tax | ${payment.cabin} | ${seatLabel}`
     );
   }
 
@@ -233,7 +236,11 @@ export function searchFlightsTool(_server: Server, clientFactory: () => IPointsY
             content: [
               {
                 type: 'text',
-                text: `No award flights found for ${params.departure} -> ${params.arrival} on ${params.departDate}.`,
+                text: [
+                `No award flights returned for ${params.departure} -> ${params.arrival} on ${params.departDate}.`,
+                ...(params.minSeats ? ['Unknown seat inventory cannot satisfy minSeats; this is not proof there are no bookable awards.'] : []),
+                ...(searchResults.notes ?? []),
+              ].join('\n'),
               },
             ],
           };

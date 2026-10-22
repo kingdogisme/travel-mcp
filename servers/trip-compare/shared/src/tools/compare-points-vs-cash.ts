@@ -4,6 +4,8 @@ import { CompareOptionsSchema } from '../types.js';
 
 const DESCRIPTION = `Compare what the same trip costs in points versus cash, and say which is the better deal.
 
+Price-integrity rule: cash fares are Google DISPLAY prices, not verified checkout totals. Single-adult one-way matching-cabin fares may be used for *indicative* CPP research only. Round-trip results have unselected returns; party pricing for multiple adults is unverified. Those searches return cash.search_status=fares_unverified, comparable_price=null, and verdict=insufficient_data rather than a definitive recommendation.
+
 This runs two live searches in one call:
 - Google Flights for the cheapest cash fares in the requested cabin
 - PointsYeah for live award availability across 20+ loyalty programs

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { lowestPricedOffer, searchMultiCity } from '../shared/src/flights-client/flights-client.js';
+import { lowestPricedOffer, quoteMetadataForSearch, searchMultiCity } from '../shared/src/flights-client/flights-client.js';
 import type {
   FlightOffer, SearchFlightsOptions, SearchFlightsResult, SearchMultiCityOptions,
 } from '../shared/src/flights-client/types.js';
@@ -39,6 +39,7 @@ function result(opts: SearchFlightsOptions, displayed: FlightOffer[], lowest: Fl
     },
     total_results: displayed.length > 0 ? 4 : 0,
     search_url: 'https://www.google.com/travel/flights',
+    ...quoteMetadataForSearch(opts.trip_type),
     price_insights: null, price_history: [], showing: { offset: 0, count: displayed.length },
     has_more: true, next_offset: 1, notes: [], flights: displayed,
     cheapest_offer: lowest,
@@ -60,6 +61,7 @@ describe('multi-city price integrity', () => {
     expect(response.coverage_status).toBe('complete');
     expect(response.legs.map((leg) => leg.options[0].price)).toEqual([1875, 1697]);
     expect(response.legs.map((leg) => leg.lowest_price)).toEqual([760, 962]);
+    expect(response.legs.map((leg) => leg.lowest_airline)).toEqual(['Mock Air', 'Mock Air']);
     expect(response.cheapest_total?.total).toBe(1722);
     expect(response.cheapest_total?.quote_kind).toBe('separate_one_way_displayed_fare_sum');
     expect(response.cheapest_total?.party_total).toBeNull();
@@ -90,6 +92,40 @@ describe('multi-city price integrity', () => {
       opts.origin === 'SAN' ? result(opts, [fare(760)], undefined as never) : result(opts, [fare(962)], fare(962)));
     expect(unknown.legs[0].status).toBe('unpriced');
     expect(unknown.cheapest_total).toBeNull();
+  });
+
+  it('marks unsupported cabin and inconsistent quote stages as partial, rather than summing the wrong class', async () => {
+    const badCabin = await searchMultiCity(itinerary, async (opts) => {
+      const data = result(opts, [fare(650)], fare(620));
+      if (opts.origin === 'SAN') data.query.cabin_honored = false;
+      return data;
+    });
+    expect(badCabin.coverage_status).toBe('partial');
+    expect(badCabin.cheapest_total).toBeNull();
+    expect(badCabin.legs[0].status).toBe('cabin_unverified');
+    expect(badCabin.legs[0].lowest_price).toBeNull();
+
+    const wrongStage = await searchMultiCity(itinerary, async (opts) => {
+      const data = result(opts, [fare(650)], fare(620));
+      if (opts.origin === 'SAN') data.quote_status = 'round_trip_return_unselected';
+      return data;
+    });
+    expect(wrongStage.coverage_status).toBe('partial');
+    expect(wrongStage.legs[0].status).toBe('unpriced');
+    expect(wrongStage.cheapest_total).toBeNull();
+  });
+
+  it('exposes pricing provenance and refuses to invent a party total for any trip type', () => {
+    const oneWay = quoteMetadataForSearch('one_way');
+    const roundTrip = quoteMetadataForSearch('round_trip');
+    expect(oneWay.quote_status).toBe('indicative_one_way');
+    expect(roundTrip.quote_status).toBe('round_trip_return_unselected');
+    expect(oneWay.price_basis).toBe('google_displayed_fare_unverified');
+    expect(roundTrip.price_basis).toBe('google_displayed_fare_unverified');
+    expect(oneWay.party_total).toBeNull();
+    expect(roundTrip.party_total).toBeNull();
+    expect(oneWay.checkout_verified).toBe(false);
+    expect(roundTrip.checkout_verified).toBe(false);
   });
 
   it('calculates lowest priced offer from the entire set without mutating it', () => {

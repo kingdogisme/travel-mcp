@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { CashQuoteStatus, CashPriceBasis } from 'google-flights-mcp-server-shared';
 
 export const CompareOptionsSchema = z.object({
   origin: z.string().min(3).describe('Origin airport code, e.g. "SFO" (comma-separate for several)'),
@@ -74,7 +75,9 @@ export const CompareOptionsSchema = z.object({
 export type CompareOptions = z.infer<typeof CompareOptionsSchema>;
 
 export interface CashOption {
+  /** Display price remains visible even when it cannot be compared against points. */
   price: number;
+  quote_status: CashQuoteStatus | 'unknown';
   currency: string;
   airline: string;
   stops: number;
@@ -131,7 +134,7 @@ export type AwardSearchStatus =
   | 'no_awards_returned'
   | 'search_failed';
 
-export type CashSearchStatus = 'fares_found' | 'no_fares_returned' | 'search_failed';
+export type CashSearchStatus = 'fares_found' | 'fares_unverified' | 'no_fares_returned' | 'search_failed';
 
 export type AwardSource = 'pointsyeah' | 'seats.aero';
 
@@ -161,6 +164,15 @@ export interface CompareResult {
     search_url: string;
     /** How the cash lookup ended; "no_fares_returned" is not proof no fare exists. */
     search_status: CashSearchStatus;
+    /** Underlying display stage. Unknown when source omits the required contract. */
+    quote_status: CashQuoteStatus | 'unknown';
+    price_basis: CashPriceBasis | 'unknown';
+    party_total: null;
+    checkout_verified: false;
+    /** Only indicative single-adult one-way fares in the requested cabin may be used for research CPP. */
+    usable_for_valuation: boolean;
+    /** The cash value the CPP model actually used; null when the displayed fare is not comparable. */
+    comparable_price: number | null;
     /** Error text when the cash lookup failed outright, else null. */
     search_error: string | null;
   };

@@ -49,7 +49,7 @@ export interface SearchAnywhereOptions {
   sort_by: 'price' | 'duration';
 }
 
-export interface SearchAnywhereResult {
+export interface SearchAnywhereResult extends CashPriceProvenance {
   query: {
     origin: string;
     departure_date: string;
@@ -122,6 +122,18 @@ export interface FlightExtensions {
   checked_bags_included: number;
 }
 
+export type CashQuoteStatus = 'indicative_one_way' | 'round_trip_return_unselected';
+export type CashPriceBasis = 'google_displayed_fare_unverified';
+
+/** Google display data, NOT a verified party total or ticketed checkout amount. */
+export interface CashPriceProvenance {
+  quote_status: CashQuoteStatus;
+  price_basis: CashPriceBasis;
+  /** A final checkout total for all passengers has not been obtained. */
+  party_total: null;
+  checkout_verified: false;
+}
+
 export interface FlightOffer {
   price: number;
   currency: string;
@@ -154,7 +166,7 @@ export interface DateGridEntry extends PricePoint {
   emissions_delta_percent: number | null;
 }
 
-export interface DateGridResult {
+export interface DateGridResult extends CashPriceProvenance {
   /** One live sample per requested date, cheapest itinerary found that day. */
   date_grid: DateGridEntry[];
   cheapest: DateGridEntry | null;
@@ -242,7 +254,7 @@ export interface SearchFlightsOptions {
   exclude_aircraft_types?: string[];
 }
 
-export interface SearchFlightsResult {
+export interface SearchFlightsResult extends CashPriceProvenance {
   query: {
     origin: string | string[];
     destination: string | string[];
@@ -356,13 +368,15 @@ export interface MultiCityLeg {
 export interface MultiCityLegResult {
   leg: MultiCityLeg;
   /** The status of this leg's independent one-way search. */
-  status: 'ok' | 'no_results' | 'failed' | 'unpriced';
+  status: 'ok' | 'no_results' | 'failed' | 'unpriced' | 'cabin_unverified';
   total_results: number;
   search_url: string | null;
   cabin_honored: boolean | null;
   options: FlightOffer[];
   /** Minimum across all filtered offers, even when not among displayed options. */
   lowest_price: number | null;
+  /** Airline for the minimum fare even if that offer was outside the result page. */
+  lowest_airline: string | null;
   notes: string[];
   error?: string;
 }
@@ -495,7 +509,7 @@ export interface RoundTripGridEntry {
   duration_minutes: number | null;
 }
 
-export interface RoundTripGridResult {
+export interface RoundTripGridResult extends CashPriceProvenance {
   /** One entry per (departure date, trip length) cell that was priced. */
   grid: RoundTripGridEntry[];
   /** The cheapest priced cell overall. */

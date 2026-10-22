@@ -216,3 +216,25 @@ describe('getUserSubFromIdToken', () => {
     expect(() => getUserSubFromIdToken(token({ email: 'a@b.c' }))).toThrow(/user sub/);
   });
 });
+
+describe('PointsYeah unknown award-seat sentinel', () => {
+  it('never satisfies minSeats when the upstream value is 9999', () => {
+    const raw = [result({ routes: [route({ seats: 9999 })] })];
+    expect(applyResultFilters(raw, { ...BASE, minSeats: 2 })).toEqual([]);
+  });
+
+  it('retains the award as a lead with null inventory and does not mutate the source', () => {
+    const raw = [result({ routes: [route({ seats: 9999 })] })];
+    const resultList = applyResultFilters(raw, BASE);
+    expect(resultList[0].routes?.[0].payment?.seats).toBeNull();
+    expect(raw[0].routes?.[0].payment?.seats).toBe(9999);
+  });
+
+  it('preserves real 9-seat results', () => {
+    const resultList = applyResultFilters(
+      [result({ routes: [route({ seats: 9 })] })],
+      { ...BASE, minSeats: 2 },
+    );
+    expect(resultList[0].routes?.[0].payment?.seats).toBe(9);
+  });
+});
