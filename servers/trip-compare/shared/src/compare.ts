@@ -9,6 +9,7 @@ import type {
   FlightRoute,
   FlightSearchResults,
 } from 'pointsyeah-mcp-server-shared';
+import { normalizeSeatCount } from 'pointsyeah-mcp-server-shared';
 import type {
   AwardOption,
   AwardSearchStatus,
@@ -240,7 +241,7 @@ function toAwardOption(
     tax: payment.tax,
     tax_currency: payment.currency,
     cabin: payment.cabin,
-    seats: payment.seats,
+    seats: normalizeSeatCount(payment.seats),
     stops: (route.segments?.length ?? 1) - 1,
     duration_minutes: routeDurationMinutes(route),
     itinerary: itinerarySummary(route),
@@ -587,7 +588,7 @@ export class TripCompareClient {
     );
     const best = eligible[0] ?? null;
     const bestValue = best?.cents_per_point_with_bonus ?? best?.cents_per_point ?? null;
-    const seatsKnown = liveOptions.some((option) => option.seats !== null);
+    const hasUnverifiedSeats = liveOptions.some((option) => option.seats === null);
 
     // "Nothing came back" and "nothing is bookable" are different claims. Track
     // which one the evidence actually supports, so one source's silence never
@@ -598,7 +599,7 @@ export class TripCompareClient {
     } else if (liveOptions.length === 0) {
       awardSearchStatus = 'no_awards_returned';
     } else if (eligible.length === 0) {
-      awardSearchStatus = seatsKnown ? 'seats_insufficient' : 'seats_unverified';
+      awardSearchStatus = hasUnverifiedSeats ? 'seats_unverified' : 'seats_insufficient';
     } else {
       awardSearchStatus = 'awards_found';
     }
@@ -648,14 +649,14 @@ export class TripCompareClient {
     } else if (!best && awardSearchStatus === 'seats_insufficient') {
       recommendation = 'cash';
       // Every option falls short of the party size, so report the roomiest one.
-      const scarce = awardOptions.reduce((a, b) => ((b.seats ?? -1) > (a.seats ?? -1) ? b : a));
+      const scarce = liveOptions.reduce((a, b) => ((b.seats ?? -1) > (a.seats ?? -1) ? b : a));
       reason =
         `Award space exists, but the roomiest option (${scarce.program_name}) only offers ${scarce.seats} seat(s) for ${options.adults} traveller(s), so it cannot cover this party.`;
     } else if (!best && awardSearchStatus === 'seats_unverified') {
       recommendation = 'insufficient_data';
       const unverified = liveOptions[0];
       reason =
-        `Award options came back (cheapest ${unverified.miles} miles on ${unverified.program_name}), but none reported a seat count, so ${options.adults} seat(s) could not be confirmed.` +
+        `Award options came back (cheapest ${unverified.miles} miles on ${unverified.program_name}), but at least one option has unverified seat availability, so ${options.adults} seat(s) could not be confirmed.` +
         `${cashNote} Verify seat availability before treating this as bookable.`;
     } else if (!best) {
       recommendation = 'insufficient_data';
