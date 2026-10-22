@@ -2,6 +2,7 @@ import type {
   IFlightsClient,
   SearchFlightsResult,
   FlightOffer,
+  CashPriceBasis,
 } from 'google-flights-mcp-server-shared';
 import type {
   IPointsYeahClient,
