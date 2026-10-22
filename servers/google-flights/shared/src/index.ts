@@ -19,6 +19,8 @@ export {
   getRoundTripGrid,
   searchAnywhere,
 } from './flights-client/flights-client.js';
+export { searchRoundTripPairs, isMatchingReturn } from './flights-client/round-trip-pairs.js';
+export { buildSelectionTfu, fetchSelectedReturnOffers } from './flights-client/flights-client.js';
 export type {
   FlightOffer,
   FlightSegment,
@@ -38,6 +40,9 @@ export type {
   MultiCityLegResult,
   MultiCityResult,
   SearchMultiCityOptions,
+  RoundTripPairsOptions,
+  RoundTripPairsResult,
+  SelectedRoundTripPair,
   RoundTripGridOptions,
   RoundTripGridResult,
   RoundTripGridEntry,

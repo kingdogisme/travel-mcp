@@ -26,3 +26,11 @@ jobs:
 
       - name: Unit tests
         run: npm test
+
+      # One SFO-LAX round-trip, read-only. A Google IP block or markup change
+      # should be visible in CI without making deterministic unit tests flaky.
+      - name: Experimental selected-return Google live canary
+        if: github.event_name == 'pull_request' && github.head_ref == 'feat/google-roundtrip-pair-selection-p1'
+        continue-on-error: true
+        timeout-minutes: 3
+        run: node scripts/smoke-google-roundtrip.mjs
