@@ -34,3 +34,9 @@ jobs:
         continue-on-error: true
         timeout-minutes: 3
         run: node scripts/smoke-google-roundtrip.mjs
+
+      - name: Experimental one-stop outbound + two-adult basis canary
+        if: github.event_name == 'pull_request' && github.head_ref == 'feat/google-connecting-outbound-pricing-p2'
+        continue-on-error: true
+        timeout-minutes: 4
+        run: node scripts/smoke-google-connecting.mjs

@@ -198,7 +198,8 @@ function getProtoRoot(): protobuf.Root {
   // Google encodes multi-airport legs by repeating these fields, so they must be
   // declared as repeated even though a single-airport search only sets one.
   // Google TFS round-trip second stage pins the outbound flight in FlightData field 4.
-  // Fields verified against the MIT-licensed nickvanw/flights reference implementation.
+  // Single-leg fields validated against nickvanw/flights; repeated legs as in
+  // KasperBuilds/google-flights-proto-mcp flights.proto (selected_flights = 4).
   const SelectedFlight = new protobuf.Type('SelectedFlight')
     .add(new protobuf.Field('from', 1, 'string'))
     .add(new protobuf.Field('date', 2, 'string'))
@@ -208,7 +209,7 @@ function getProtoRoot(): protobuf.Root {
 
   const FlightData = new protobuf.Type('FlightData')
     .add(new protobuf.Field('date', 2, 'string'))
-    .add(new protobuf.Field('selectedFlight', 4, 'SelectedFlight'))
+    .add(new protobuf.Field('selectedFlights', 4, 'SelectedFlight', 'repeated'))
     .add(new protobuf.Field('maxStops', 9, 'int32', 'optional'))
     .add(new protobuf.Field('fromFlight', 13, 'Airport', 'repeated'))
     .add(new protobuf.Field('toFlight', 14, 'Airport', 'repeated'));
@@ -286,8 +287,8 @@ export async function buildTfsParam(options: {
   infantsInSeat: number;
   infantsOnLap: number;
   maxStops?: number;
-  /** Experimental second-stage selection: currently supports a nonstop outbound only. */
-  selectedOutbound?: FlightSegment;
+  /** Selected physical segments of an outbound, nonstop or one-stop, max two. */
+  selectedOutbound?: FlightSegment | FlightSegment[];
 }): Promise<string> {
   const root = getProtoRoot();
   const Info = root.lookupType('Info');
@@ -317,22 +318,40 @@ export async function buildTfsParam(options: {
     if (options.tripType !== 'round_trip' || !options.returnDate) {
       throw new Error('Selecting an outbound requires a round_trip search with returnDate');
     }
-    const selected = options.selectedOutbound;
-    const flightMatch = selected.flight_number.toUpperCase().match(/^([A-Z0-9]{2})([0-9]{1,4})$/);
-    if (!flightMatch ||
-        selected.airline_code.toUpperCase() !== flightMatch[1] ||
-        selected.departure_date !== options.departureDate ||
-        !origins.includes(selected.origin) ||
-        !destinations.includes(selected.destination)) {
-      throw new Error('Selected outbound flight does not match the requested airports, date or airline code');
+    const segments = Array.isArray(options.selectedOutbound)
+      ? options.selectedOutbound
+      : [options.selectedOutbound];
+    if (segments.length === 0 || segments.length > 2) {
+      throw new Error('Selected outbound requires one or two physical flight segments');
     }
-    outboundLeg.selectedFlight = {
-      from: selected.origin,
-      date: selected.departure_date,
-      to: selected.destination,
-      airline: selected.airline_code,
-      flightNumber: flightMatch[2],
-    };
+    if (segments[0].departure_date !== options.departureDate ||
+        !origins.includes(segments[0].origin) ||
+        !destinations.includes(segments[segments.length - 1].destination)) {
+      throw new Error('Selected outbound itinerary does not match the requested airports or departure date');
+    }
+    const selectedFlights: Array<Record<string, string>> = [];
+    for (let index = 0; index < segments.length; index++) {
+      const selected = segments[index];
+      const flightMatch = selected.flight_number.toUpperCase().match(/^([A-Z0-9]{2})([0-9]{1,4})$/);
+      const previous = index > 0 ? segments[index - 1] : null;
+      const daysLater = (Date.parse(selected.departure_date + 'T00:00:00Z') -
+        Date.parse(options.departureDate + 'T00:00:00Z')) / 86400000;
+      if (!flightMatch ||
+          selected.airline_code.toUpperCase() !== flightMatch[1] ||
+          !Number.isInteger(daysLater) || daysLater < 0 || daysLater > 2 ||
+          (previous && (previous.destination !== selected.origin ||
+            previous.arrival_date > selected.departure_date))) {
+        throw new Error('Selected outbound flight segments are invalid or do not connect in travel order');
+      }
+      selectedFlights.push({
+        from: selected.origin,
+        date: selected.departure_date,
+        to: selected.destination,
+        airline: selected.airline_code,
+        flightNumber: flightMatch[2],
+      });
+    }
+    outboundLeg.selectedFlights = selectedFlights;
   }
   flightData.push(outboundLeg as unknown as protobuf.Message);
 
