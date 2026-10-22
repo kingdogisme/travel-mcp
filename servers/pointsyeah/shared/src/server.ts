@@ -26,6 +26,7 @@ import type { PlaywrightSearchDeps } from './pointsyeah-client/lib/search.js';
 import { fetchSearchResults } from './pointsyeah-client/lib/fetch-results.js';
 import { getSearchHistory } from './pointsyeah-client/lib/user-api.js';
 import { logDebug, logWarning } from './logging.js';
+import { normalizeAwardSeatFields, normalizeSeatCount } from './seat-availability.js';
 import {
   API2_BASE,
   LIVE_BASE,
@@ -245,8 +246,10 @@ function routePassesFilters(route: FlightRoute, params: FlightSearchParams): boo
   if (params.maxTax !== undefined && (payment === null || payment.tax > params.maxTax)) {
     return false;
   }
-  if (params.minSeats !== undefined && (payment === null || payment.seats < params.minSeats)) {
-    return false;
+  if (params.minSeats !== undefined) {
+    const availableSeats = normalizeSeatCount(payment?.seats);
+    // Unknown inventory cannot satisfy a requirement for confirmed seat counts.
+    if (availableSeats === null || availableSeats < params.minSeats) return false;
   }
   if (params.maxStops !== undefined && segments.length - 1 > params.maxStops) {
     return false;
@@ -306,7 +309,7 @@ function routeMatchesCabins(route: FlightRoute, wanted: string[]): boolean {
 export function applyResultFilters(
   results: FlightResult[],
   params: FlightSearchParams,
-  stats?: { droppedByCabin?: number }
+  stats?: { droppedByCabin?: number; unverifiedSeatOptions?: number }
 ): FlightResult[] {
   let scoped = results;
   const programs = (params.airlineProgram ?? []).filter(
@@ -330,7 +333,13 @@ export function applyResultFilters(
 
   const filtered: FlightResult[] = [];
   for (const result of scoped) {
-    let routes = result.routes ?? [];
+    let routes = (result.routes ?? []).map((route) => {
+      if (!route.payment) return route;
+      const seats = normalizeSeatCount(route.payment.seats);
+      if (seats === route.payment.seats) return route;
+      if (stats) stats.unverifiedSeatOptions = (stats.unverifiedSeatOptions ?? 0) + 1;
+      return { ...route, payment: { ...route.payment, seats } };
+    });
     if (hasRouteFilters) {
       routes = routes.filter((route) => routePassesFilters(route, params));
     }
@@ -558,13 +567,18 @@ export class PointsYeahClient implements IPointsYeahClient {
     }
 
     const unfiltered = Array.from(allResults.values());
-    const stats: { droppedByCabin?: number } = {};
+    const stats: { droppedByCabin?: number; unverifiedSeatOptions?: number } = {};
     const results = applyResultFilters(unfiltered, resolved, stats);
 
     const notes: string[] = [];
     if (stats.droppedByCabin) {
       notes.push(
         `${stats.droppedByCabin} award option(s) in other cabins were hidden locally — PointsYeah does not apply the cabin filter server-side.`
+      );
+    }
+    if (stats.unverifiedSeatOptions) {
+      notes.push(
+        `${stats.unverifiedSeatOptions} award option(s) had unverified seat counts, including possible upstream 9999 placeholders. These are leads, not confirmed inventory; minSeats excludes unknown counts.`
       );
     }
 
@@ -583,12 +597,14 @@ export class PointsYeahClient implements IPointsYeahClient {
   // --- Explorer (award map), on api2 ---
 
   async exploreAwardRoutes(body: Record<string, unknown>): Promise<AwardExplorerResult> {
-    return this.withAuth((idToken) => api2Post<AwardExplorerResult>('/explorer/search', body, idToken));
+    return this.withAuth(async (idToken) =>
+      normalizeAwardSeatFields(await api2Post<AwardExplorerResult>('/explorer/search', body, idToken))
+    );
   }
 
   async exploreAwardAggregate(body: Record<string, unknown>): Promise<AwardExplorerResult> {
     return this.withAuth((idToken) =>
-      api2Post<AwardExplorerResult>('/explorer/search/aggregate', body, idToken)
+      api2Post<AwardExplorerResult>('/explorer/search/aggregate', body, idToken).then(normalizeAwardSeatFields)
     );
   }
 
@@ -598,7 +614,7 @@ export class PointsYeahClient implements IPointsYeahClient {
 
   async exploreAwardRecommend(body: Record<string, unknown>): Promise<Record<string, unknown>> {
     return this.withAuth((idToken) =>
-      api2Post<Record<string, unknown>>('/explorer/recommend', body, idToken)
+      api2Post<Record<string, unknown>>('/explorer/recommend', body, idToken).then(normalizeAwardSeatFields)
     );
   }
 
