@@ -40,3 +40,14 @@ jobs:
         continue-on-error: true
         timeout-minutes: 4
         run: node scripts/smoke-google-connecting.mjs
+
+      # This canary NEVER authenticates or touches account credentials.
+      # A website challenge or GitHub-hosted IP block is an informative result,
+      # not a reason to fail deterministic production tests.
+      - name: Experimental PointsYeah password sign-in UI (no credentials)
+        if: github.event_name == 'pull_request' && github.head_ref == 'experiment/pointsyeah-password-login-poc'
+        continue-on-error: true
+        timeout-minutes: 4
+        run: |
+          npx playwright install chromium
+          node scripts/pointsyeah-password-login.mjs --check-ui
